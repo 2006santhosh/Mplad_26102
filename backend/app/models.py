@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Numeric, Date, DateTime, ForeignKey, Text, Float, JSON
+from sqlalchemy import Column, Integer, String, Numeric, Date, DateTime, ForeignKey, Text, Float, JSON, Boolean
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from .database import Base
@@ -72,6 +72,7 @@ class Project(Base):
     compliance_assessments = relationship("ComplianceAssessment", back_populates="project")
     early_warnings = relationship("EarlyWarning", back_populates="project")
     predictive_completion_assessments = relationship("PredictiveCompletionAssessment", back_populates="project")
+    review_cases = relationship("ReviewCase", back_populates="project")
 
     @property
     def source_type(self):
@@ -290,3 +291,94 @@ class PredictiveCompletionAssessment(Base):
     created_at = Column(DateTime, server_default=func.now())
 
     project = relationship("Project", back_populates="predictive_completion_assessments")
+
+
+# ============================================================
+# Phase 9 — Review Case, Case Notes, Case Audit Events
+# ============================================================
+
+_VALID_CASE_STATUSES = ('OPEN', 'UNDER_REVIEW', 'ACTION_REQUIRED', 'RESOLVED', 'DISMISSED')
+_VALID_CASE_PRIORITIES = ('LOW', 'MEDIUM', 'HIGH', 'CRITICAL')
+
+# Valid status transitions (server-side enforced)
+CASE_TRANSITIONS = {
+    'OPEN': ('UNDER_REVIEW', 'DISMISSED'),
+    'UNDER_REVIEW': ('ACTION_REQUIRED', 'RESOLVED', 'DISMISSED'),
+    'ACTION_REQUIRED': ('RESOLVED', 'UNDER_REVIEW'),
+    'RESOLVED': (),       # terminal
+    'DISMISSED': (),      # terminal
+}
+
+_VALID_AUDIT_ACTIONS = (
+    'CASE_CREATED', 'CASE_ASSIGNED', 'STATUS_CHANGED', 'NOTE_ADDED',
+    'EVIDENCE_ATTACHED', 'COMMENT_RECORDED', 'FLAG_RECORDED', 'CLEAR_RECORDED',
+    'HALT_RECORDED', 'CASE_RESOLVED', 'CASE_DISMISSED',
+)
+
+
+class ReviewCase(Base):
+    """Central case entity linking official AI signals to an investigation workflow."""
+    __tablename__ = "review_cases"
+    id = Column(Integer, primary_key=True, index=True)
+    project_id = Column(Integer, ForeignKey("projects.id"), nullable=False, index=True)
+    case_reference = Column(String, unique=True, nullable=False, index=True)  # MPLAD-REV-XXXX
+    status = Column(String, nullable=False, default='OPEN', index=True)       # OPEN | UNDER_REVIEW | ACTION_REQUIRED | RESOLVED | DISMISSED
+    priority = Column(String, nullable=False, default='MEDIUM')               # LOW | MEDIUM | HIGH | CRITICAL
+    opened_by_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    assigned_to_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    summary = Column(Text, nullable=True)                                     # brief case description
+    initial_note = Column(Text, nullable=True)                                # note provided at creation
+    resolution_note = Column(Text, nullable=True)                             # filled on RESOLVED/DISMISSED
+    triggering_signals = Column(JSON, nullable=True)                          # snapshot of signals at creation
+    opened_at = Column(DateTime, server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
+    resolved_at = Column(DateTime, nullable=True)
+
+    # Relationships
+    project = relationship("Project", back_populates="review_cases")
+    opened_by = relationship("User", foreign_keys=[opened_by_id])
+    assigned_to = relationship("User", foreign_keys=[assigned_to_id])
+    notes = relationship("CaseNote", back_populates="case", order_by="CaseNote.created_at")
+    audit_events = relationship("CaseAuditEvent", back_populates="case", order_by="CaseAuditEvent.created_at")
+
+
+class CaseNote(Base):
+    """Immutable official notes attached to a review case.
+
+    Notes are append-only: no UPDATE or DELETE endpoint is provided.
+    Provenance: OFFICIAL ACTION
+    """
+    __tablename__ = "case_notes"
+    id = Column(Integer, primary_key=True, index=True)
+    case_id = Column(Integer, ForeignKey("review_cases.id"), nullable=False, index=True)
+    author_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    content = Column(Text, nullable=False)
+    provenance = Column(String, nullable=False, default='OFFICIAL ACTION')
+    created_at = Column(DateTime, server_default=func.now(), nullable=False)
+
+    case = relationship("ReviewCase", back_populates="notes")
+    author = relationship("User")
+
+
+class CaseAuditEvent(Base):
+    """Append-only audit trail for every official action on a review case.
+
+    - No UPDATE or DELETE endpoint is exposed.
+    - Every event records: WHO (user_id), WHAT (action), WHEN (created_at).
+    - Provenance: OFFICIAL ACTION
+    """
+    __tablename__ = "case_audit_events"
+    id = Column(Integer, primary_key=True, index=True)
+    case_id = Column(Integer, ForeignKey("review_cases.id"), nullable=False, index=True)
+    project_id = Column(Integer, ForeignKey("projects.id"), nullable=False, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    action = Column(String, nullable=False)          # one of _VALID_AUDIT_ACTIONS
+    previous_status = Column(String, nullable=True)
+    new_status = Column(String, nullable=True)
+    comment = Column(Text, nullable=True)
+    metadata_json = Column(JSON, nullable=True)      # additional structured context
+    provenance = Column(String, nullable=False, default='OFFICIAL ACTION')
+    created_at = Column(DateTime, server_default=func.now(), nullable=False)
+
+    case = relationship("ReviewCase", back_populates="audit_events")
+    user = relationship("User")

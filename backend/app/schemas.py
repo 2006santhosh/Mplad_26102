@@ -179,6 +179,7 @@ class RiskAssessmentResponse(BaseModel):
     total_indicator_count: int
     risk_reasons: List[str]
     indicators: List[RiskIndicatorSchema]
+
 class PreSanctionRequest(BaseModel):
     category: str
     sanctioned_amount: float
@@ -358,7 +359,6 @@ class GISResponse(BaseModel):
     clusters: List[GISCluster]
     total_valid_projects: int
 
-
 class TimelineEvent(BaseModel):
     date: date
     event_type: str # e.g. 'Sanction recorded', 'Risk assessment', 'Early warning generated'
@@ -398,3 +398,168 @@ class DecisionSupportResponse(BaseModel):
     data_quality: DataQuality
     timeline: List[TimelineEvent]
     provenance: dict
+
+
+# ============================================================
+# Phase 9 — Review Case Schemas
+# ============================================================
+
+class UserBriefResponse(BaseModel):
+    id: int
+    username: str
+    role: str
+
+    class Config:
+        from_attributes = True
+
+
+class ReviewCaseCreate(BaseModel):
+    project_id: int
+    summary: Optional[str] = None
+    priority: Optional[str] = "MEDIUM"
+    initial_note: Optional[str] = None
+    triggering_signals: Optional[List[dict]] = None
+
+    @validator('priority')
+    def validate_priority(cls, v):
+        allowed = ['LOW', 'MEDIUM', 'HIGH', 'CRITICAL']
+        if v not in allowed:
+            raise ValueError(f"Priority must be one of {allowed}")
+        return v
+
+
+class ReviewCaseUpdate(BaseModel):
+    status: Optional[str] = None
+    priority: Optional[str] = None
+    assigned_to_id: Optional[int] = None
+    summary: Optional[str] = None
+    resolution_note: Optional[str] = None
+
+    @validator('status')
+    def validate_status(cls, v):
+        if v is not None:
+            allowed = ['OPEN', 'UNDER_REVIEW', 'ACTION_REQUIRED', 'RESOLVED', 'DISMISSED']
+            if v not in allowed:
+                raise ValueError(f"Status must be one of {allowed}")
+        return v
+
+    @validator('priority')
+    def validate_priority(cls, v):
+        if v is not None:
+            allowed = ['LOW', 'MEDIUM', 'HIGH', 'CRITICAL']
+            if v not in allowed:
+                raise ValueError(f"Priority must be one of {allowed}")
+        return v
+
+
+class CaseNoteCreate(BaseModel):
+    content: str
+
+    @validator('content')
+    def validate_content(cls, v):
+        if not v or not v.strip():
+            raise ValueError("Note content cannot be empty")
+        return v.strip()
+
+
+class CaseNoteResponse(BaseModel):
+    id: int
+    case_id: int
+    author: Optional[UserBriefResponse] = None
+    content: str
+    provenance: str
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class CaseAuditEventResponse(BaseModel):
+    id: int
+    case_id: int
+    project_id: int
+    user: Optional[UserBriefResponse] = None
+    action: str
+    previous_status: Optional[str] = None
+    new_status: Optional[str] = None
+    comment: Optional[str] = None
+    metadata_json: Optional[dict] = None
+    provenance: str
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class CaseActionRequest(BaseModel):
+    """Record an official action on a case (COMMENT/FLAG/CLEAR/HALT).
+    These mirror the existing ReviewLog actions but are case-scoped.
+    HALT requires confirmed=True and an authorized role (Admin/State).
+    AI must never trigger HALT automatically.
+    """
+    action: str
+    comment: str
+    confirmed: Optional[bool] = False  # required True for HALT
+
+    @validator('action')
+    def validate_action(cls, v):
+        allowed = ['COMMENT', 'FLAG', 'CLEAR', 'HALT']
+        if v not in allowed:
+            raise ValueError(f"Action must be one of {allowed}")
+        return v
+
+    @validator('comment')
+    def validate_comment(cls, v):
+        if not v or not v.strip():
+            raise ValueError("A comment/reason is required for all official actions")
+        return v.strip()
+
+
+class ReviewCaseResponse(BaseModel):
+    id: int
+    case_reference: str
+    project_id: int
+    status: str
+    priority: str
+    summary: Optional[str] = None
+    initial_note: Optional[str] = None
+    resolution_note: Optional[str] = None
+    triggering_signals: Optional[List[dict]] = []
+    opened_by: Optional[UserBriefResponse] = None
+    assigned_to: Optional[UserBriefResponse] = None
+    opened_at: datetime
+    updated_at: Optional[datetime] = None
+    resolved_at: Optional[datetime] = None
+    notes: Optional[List[CaseNoteResponse]] = []
+    audit_events: Optional[List[CaseAuditEventResponse]] = []
+
+    class Config:
+        from_attributes = True
+
+
+class ReviewCaseSummary(BaseModel):
+    """Lightweight summary for list views — avoids N+1 by excluding notes/audit."""
+    id: int
+    case_reference: str
+    project_id: int
+    status: str
+    priority: str
+    summary: Optional[str] = None
+    opened_by: Optional[UserBriefResponse] = None
+    assigned_to: Optional[UserBriefResponse] = None
+    opened_at: datetime
+    updated_at: Optional[datetime] = None
+    resolved_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+
+class ReviewCaseListResponse(BaseModel):
+    cases: List[ReviewCaseSummary]
+    total: int
+    open_count: int
+    under_review_count: int
+    action_required_count: int
+    resolved_count: int
+    dismissed_count: int

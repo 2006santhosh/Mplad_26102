@@ -5,6 +5,8 @@ import { ProjectRegister } from './pages/ProjectRegister';
 import { ProjectIntelligence } from './pages/ProjectIntelligence';
 import { PreSanction } from './pages/PreSanction';
 import { Login } from './pages/Login';
+import { ReviewCases } from './pages/ReviewCases';
+import { ReviewCaseDetail } from './pages/ReviewCaseDetail';
 import { logout } from './lib/api';
 
 const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
@@ -30,6 +32,7 @@ function App() {
               <div className="flex space-x-4">
                 <Link to="/" className="px-3 py-2 rounded-md text-sm font-medium hover:bg-slate-800">Dashboard</Link>
                 <Link to="/projects" className="px-3 py-2 rounded-md text-sm font-medium hover:bg-slate-800">Projects</Link>
+                <Link to="/review-cases" className="px-3 py-2 rounded-md text-sm font-medium hover:bg-slate-800 text-indigo-300">Review Cases</Link>
                 <Link to="/pre-sanction" className="px-3 py-2 rounded-md text-sm font-medium hover:bg-slate-800">Pre-Sanction</Link>
                 {localStorage.getItem('token') && (
                   <button onClick={logout} className="px-3 py-2 rounded-md text-sm font-medium hover:bg-red-800 bg-red-900/50">Logout</button>
@@ -45,6 +48,8 @@ function App() {
               <Route path="/" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
               <Route path="/projects" element={<ProtectedRoute><ProjectRegister /></ProtectedRoute>} />
               <Route path="/projects/:id" element={<ProtectedRoute><ProjectIntelligence /></ProtectedRoute>} />
+              <Route path="/review-cases" element={<ProtectedRoute><ReviewCases /></ProtectedRoute>} />
+              <Route path="/review-cases/:id" element={<ProtectedRoute><ReviewCaseDetail /></ProtectedRoute>} />
               <Route path="/pre-sanction" element={<ProtectedRoute><PreSanction /></ProtectedRoute>} />
             </Routes>
         </main>

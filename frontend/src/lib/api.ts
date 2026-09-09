@@ -142,3 +142,71 @@ export const getDecisionSupport = async (id: number) => {
   const res = await api.get(`/api/projects/${id}/decision-support`);
   return res.data;
 };
+
+// ─────────────────────────────────────────────────────────────────
+// Phase 9 — Review Cases API
+// ─────────────────────────────────────────────────────────────────
+
+export const getReviewCases = async (params?: {
+  status?: string;
+  priority?: string;
+  district?: string;
+  project_id?: number;
+  assigned_to_id?: number;
+  skip?: number;
+  limit?: number;
+}) => {
+  const res = await api.get('/api/review-cases', { params });
+  return res.data;
+};
+
+export const getProjectReviewCases = async (projectId: number) => {
+  const res = await api.get(`/api/projects/${projectId}/review-cases`);
+  return res.data;
+};
+
+export const getReviewCase = async (caseId: number) => {
+  const res = await api.get(`/api/review-cases/${caseId}`);
+  return res.data;
+};
+
+export const createReviewCase = async (data: {
+  project_id: number;
+  summary?: string;
+  priority?: string;
+  initial_note?: string;
+  triggering_signals?: any[];
+}) => {
+  const res = await api.post('/api/review-cases', data);
+  return res.data;
+};
+
+export const updateReviewCase = async (caseId: number, data: {
+  status?: string;
+  priority?: string;
+  assigned_to_id?: number;
+  summary?: string;
+  resolution_note?: string;
+}) => {
+  const res = await api.patch(`/api/review-cases/${caseId}`, data);
+  return res.data;
+};
+
+export const addCaseNote = async (caseId: number, data: { content: string }) => {
+  const res = await api.post(`/api/review-cases/${caseId}/notes`, data);
+  return res.data;
+};
+
+export const addCaseAction = async (caseId: number, data: {
+  action: string;
+  comment: string;
+  confirmed?: boolean;
+}) => {
+  const res = await api.post(`/api/review-cases/${caseId}/actions`, data);
+  return res.data;
+};
+
+export const getCaseAudit = async (caseId: number) => {
+  const res = await api.get(`/api/review-cases/${caseId}/audit`);
+  return res.data;
+};

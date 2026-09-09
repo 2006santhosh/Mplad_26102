@@ -1,18 +1,23 @@
 import { useEffect, useState } from 'react';
-import { useParams, Link } from 'react-router-dom';
-import { getProjectDetails, getDecisionSupport, getReviews, postReview } from '../lib/api';
+import { useParams, Link, useNavigate } from 'react-router-dom';
+import { getProjectDetails, getDecisionSupport, getReviews, postReview, getProjectReviewCases, createReviewCase } from '../lib/api';
 import { 
   ShieldCheck, AlertTriangle, AlertCircle, Clock, CheckCircle, 
-  History, Info, MessageSquare, Server, Layers 
+  History, Info, MessageSquare, Server, Layers, FolderOpen, ExternalLink
 } from 'lucide-react';
 import { ProvenanceBadge } from '../components/ProvenanceBadge';
 
 export const ProjectIntelligence = () => {
   const { id } = useParams();
+  const navigate = useNavigate();
   const [project, setProject] = useState<any>(null);
   const [decisionSupport, setDecisionSupport] = useState<any>(null);
   const [reviews, setReviews] = useState<any[]>([]);
+  const [projectCases, setProjectCases] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [showCaseDialog, setShowCaseDialog] = useState(false);
+  const [caseNote, setCaseNote] = useState('');
+  const [creatingCase, setCreatingCase] = useState(false);
   
   const [reviewForm, setReviewForm] = useState({ reviewed_by: 'Authorized Official', action: 'COMMENT', comment: '' });
   const [submittingReview, setSubmittingReview] = useState(false);
@@ -24,7 +29,8 @@ export const ProjectIntelligence = () => {
       Promise.all([
         getProjectDetails(numId).then(setProject),
         getDecisionSupport(numId).then(setDecisionSupport),
-        getReviews(numId).then(setReviews).catch(() => {})
+        getReviews(numId).then(setReviews).catch(() => {}),
+        getProjectReviewCases(numId).then(setProjectCases).catch(() => {}),
       ]).finally(() => setLoading(false));
     }
   }, [id]);
@@ -44,6 +50,35 @@ export const ProjectIntelligence = () => {
     }
   };
 
+  const handleOpenCase = async () => {
+    if (!id || !decisionSupport) return;
+    setCreatingCase(true);
+    try {
+      const signals = decisionSupport.review_priority.why_flagged.map((f: any) => ({
+        signal_type: f.signal_type,
+        severity: f.severity,
+        explanation: f.explanation,
+        provenance: f.provenance,
+      }));
+      const newCase = await createReviewCase({
+        project_id: Number(id),
+        summary: `Official review: ${project?.category || 'MPLADS Work'} #${project?.work_id || id}`,
+        priority: decisionSupport.review_priority.level,
+        initial_note: caseNote || 'Case opened from Project Intelligence by authorized official.',
+        triggering_signals: signals,
+      });
+      setShowCaseDialog(false);
+      setCaseNote('');
+      // Refresh project cases
+      getProjectReviewCases(Number(id)).then(setProjectCases).catch(() => {});
+      navigate(`/review-cases/${newCase.id}`);
+    } catch (err: any) {
+      alert(err.response?.data?.detail || 'Failed to open review case');
+    } finally {
+      setCreatingCase(false);
+    }
+  };
+
   if (loading) return <div className="p-8 flex items-center gap-2"><Clock className="w-5 h-5 animate-spin" /> Loading official records...</div>;
   if (!project) return <div className="p-8">Project not found.</div>;
 
@@ -55,6 +90,9 @@ export const ProjectIntelligence = () => {
       default: return 'bg-slate-100 text-slate-800 border-slate-200';
     }
   };
+
+  // Active cases = not RESOLVED or DISMISSED
+  const activeCase = projectCases.find((c: any) => ['OPEN','UNDER_REVIEW','ACTION_REQUIRED'].includes(c.status));
 
   return (
     <div className="p-8 max-w-7xl mx-auto space-y-8 font-sans">
@@ -236,6 +274,80 @@ export const ProjectIntelligence = () => {
               </div>
           </div>
         </>
+      )}
+
+      {/* ── OFFICIAL REVIEW CASE SECTION ── */}
+      <div className="bg-white border border-indigo-200 rounded-xl shadow-xs overflow-hidden">
+        <div className="p-4 border-b bg-indigo-50/50 flex items-center justify-between">
+          <h2 className="text-lg font-bold text-gray-900 flex items-center gap-2">
+            <FolderOpen className="w-5 h-5 text-indigo-600" /> Official Review Case
+          </h2>
+          {!activeCase ? (
+            <button
+              onClick={() => setShowCaseDialog(true)}
+              disabled={!decisionSupport}
+              className="bg-indigo-600 text-white text-sm font-medium px-4 py-2 rounded-lg hover:bg-indigo-700 shadow-sm transition disabled:opacity-50"
+            >
+              Open Review Case
+            </button>
+          ) : (
+            <Link
+              to={`/review-cases/${activeCase.id}`}
+              className="flex items-center gap-1 text-indigo-600 hover:underline text-sm font-medium"
+            >
+              View Case <ExternalLink className="w-3.5 h-3.5" />
+            </Link>
+          )}
+        </div>
+        <div className="p-5">
+          {activeCase ? (
+            <div className="space-y-2">
+              <div className="flex justify-between text-sm"><span className="text-gray-500">Reference</span><span className="font-mono font-bold text-indigo-700">{activeCase.case_reference}</span></div>
+              <div className="flex justify-between text-sm"><span className="text-gray-500">Status</span><span className="font-bold text-gray-800">{activeCase.status?.replace('_',' ')}</span></div>
+              <div className="flex justify-between text-sm"><span className="text-gray-500">Priority</span><span className="font-bold text-gray-800">{activeCase.priority}</span></div>
+              <div className="flex justify-between text-sm"><span className="text-gray-500">Assigned</span><span className="font-bold text-gray-800">{activeCase.assigned_to?.username || 'Unassigned'}</span></div>
+              <div className="flex justify-between text-sm"><span className="text-gray-500">Opened</span><span className="font-bold text-gray-800">{new Date(activeCase.opened_at).toLocaleDateString()}</span></div>
+            </div>
+          ) : (
+            <div className="text-center py-4 text-gray-400">
+              <FolderOpen className="w-8 h-8 mx-auto mb-2 opacity-30" />
+              <p className="text-sm">No active review case. Open one to begin the investigation workflow.</p>
+              <p className="text-xs mt-1">AI signals are recommendations only. Officials decide and act.</p>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Open Case Dialog */}
+      {showCaseDialog && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full p-6">
+            <h3 className="text-lg font-bold text-gray-900 mb-2">Open Official Review Case</h3>
+            <p className="text-sm text-gray-600 mb-4">
+              Creates an official review case for Project #{id}.
+              AI signals are pre-populated. <strong>Officials decide and act.</strong>
+            </p>
+            {decisionSupport?.review_priority && (
+              <div className="mb-4 p-3 bg-orange-50 border border-orange-100 rounded-lg text-sm">
+                <p className="font-bold text-orange-800">Priority: {decisionSupport.review_priority.level}</p>
+                <p className="text-orange-700 text-xs mt-1">{decisionSupport.review_priority.contributing_signals?.slice(0,3).join(' · ')}</p>
+              </div>
+            )}
+            <textarea
+              value={caseNote}
+              onChange={e => setCaseNote(e.target.value)}
+              rows={3}
+              className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm mb-4 focus:ring-2 focus:ring-indigo-400 focus:outline-none"
+              placeholder="Initial note (optional)..."
+            />
+            <div className="flex gap-3">
+              <button onClick={() => { setShowCaseDialog(false); setCaseNote(''); }} className="flex-1 border border-gray-200 text-gray-600 py-2 rounded-lg text-sm font-medium hover:bg-gray-50">Cancel</button>
+              <button onClick={handleOpenCase} disabled={creatingCase} className="flex-1 bg-indigo-600 text-white py-2 rounded-lg text-sm font-medium hover:bg-indigo-700 disabled:opacity-50 shadow-sm">
+                {creatingCase ? 'Opening...' : 'Open Case'}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* Official Actions */}

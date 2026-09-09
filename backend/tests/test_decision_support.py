@@ -31,7 +31,7 @@ def setup_module():
     
     now = datetime.datetime.now(datetime.UTC)
     
-    # Fully populated project 1
+    # Fully populated project 1 — normal numeric coverage (90.0)
     p1 = Project(id=1, mp_id=1, data_source_id=1, sanctioned_amount=1000000, status="ONGOING", latitude=10.0, longitude=20.0, planned_start=now.date())
     db.add(p1)
     db.add(ProjectProgress(project_id=1, percentage=50, reported_at=now))
@@ -47,6 +47,21 @@ def setup_module():
     # Empty project 2
     p2 = Project(id=2, mp_id=1, data_source_id=1, sanctioned_amount=1000000, status="ONGOING")
     db.add(p2)
+
+    # Project 3 — RiskAssessment exists but assessment_coverage_pct is NULL (the regression scenario)
+    p3 = Project(id=3, mp_id=1, data_source_id=1, sanctioned_amount=500000, status="ONGOING")
+    db.add(p3)
+    db.add(RiskAssessment(project_id=3, score=50, overall_risk_level="MEDIUM", assessment_coverage_pct=None, created_at=now))
+
+    # Project 4 — RiskAssessment exists with coverage = 0 (zero is a real numeric value, not None)
+    p4 = Project(id=4, mp_id=1, data_source_id=1, sanctioned_amount=500000, status="ONGOING")
+    db.add(p4)
+    db.add(RiskAssessment(project_id=4, score=40, overall_risk_level="LOW", assessment_coverage_pct=0.0, created_at=now))
+
+    # Project 5 — MEDIUM risk, no history (tests review priority preservation)
+    p5 = Project(id=5, mp_id=1, data_source_id=1, sanctioned_amount=500000, status="ONGOING")
+    db.add(p5)
+    db.add(RiskAssessment(project_id=5, score=55, overall_risk_level="MEDIUM", assessment_coverage_pct=75.0, created_at=now))
 
     db.commit()
     db.close()
@@ -85,5 +100,53 @@ def test_timeline_contains_real_events():
     assert "Progress Update" in event_types
     assert "Risk Assessment" in event_types
 
+# ---------------------------------------------------------------------------
+# Regression tests — NULL / zero coverage bug (Phase 9 fix)
+# ---------------------------------------------------------------------------
+
+def test_coverage_numeric_unchanged():
+    """TEST 1: Normal numeric coverage (90.0) — existing behavior preserved."""
+    response = client.get("/api/projects/1/decision-support")
+    assert response.status_code == 200
+    data = response.json()
+    # coverage is 90.0 — well above 30, so "Low evidence coverage" signal must NOT appear
+    signals = data["review_priority"]["contributing_signals"]
+    assert "Low evidence coverage" not in signals
+    # evidence_coverage must be the actual numeric value
+    assert data["review_priority"]["evidence_coverage"] == 90.0
+
+def test_coverage_none_no_500():
+    """TEST 2: coverage = None — must return HTTP 200, no TypeError, coverage stays None."""
+    response = client.get("/api/projects/3/decision-support")
+    assert response.status_code == 200
+    data = response.json()
+    # coverage must remain None (unavailable), not coerced to 0
+    assert data["review_priority"]["evidence_coverage"] is None
+    # "Low evidence coverage" must NOT be added when coverage is None
+    # (None != insufficient-numeric; we simply cannot assess coverage)
+    signals = data["review_priority"]["contributing_signals"]
+    assert "Low evidence coverage" not in signals
+
+def test_coverage_zero_is_numeric():
+    """TEST 3: coverage = 0 — treated as real numeric 0, not as None."""
+    response = client.get("/api/projects/4/decision-support")
+    assert response.status_code == 200
+    data = response.json()
+    # 0 < 30 so "Low evidence coverage" MUST appear
+    signals = data["review_priority"]["contributing_signals"]
+    assert "Low evidence coverage" in signals
+    # evidence_coverage must be exactly 0, not None
+    assert data["review_priority"]["evidence_coverage"] == 0.0
+
+def test_review_priority_preserved_medium_risk():
+    """TEST 5: Review Priority — MEDIUM risk with sufficient coverage stays MEDIUM."""
+    response = client.get("/api/projects/5/decision-support")
+    assert response.status_code == 200
+    data = response.json()
+    # MEDIUM risk, no warnings, no compliance issues, coverage 75% (above 30)
+    assert data["review_priority"]["level"] == "MEDIUM"
+    assert "Low evidence coverage" not in data["review_priority"]["contributing_signals"]
+
 def teardown_module():
     app.dependency_overrides.clear()
+

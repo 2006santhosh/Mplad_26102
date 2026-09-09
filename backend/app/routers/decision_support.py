@@ -155,7 +155,8 @@ def get_decision_support(project_id: int, db: Session = Depends(get_db), current
     if priority_level == "LOW" and overall_risk["level"] == "MEDIUM":
         priority_level = "MEDIUM"
 
-    if overall_risk["coverage"] < 30.0:
+    _coverage = overall_risk["coverage"]
+    if _coverage is not None and _coverage < 30.0:
         contributing_signals.append("Low evidence coverage")
         if priority_level == "LOW":
             priority_level = "MEDIUM" # elevate slightly due to uncertainty
