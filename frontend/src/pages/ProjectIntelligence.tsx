@@ -1,12 +1,11 @@
 import { useEffect, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { getProjectDetails, runRiskAssessment, getCompliance, assessCompliance, getRiskHistory, getComplianceHistory, getTrends, getEarlyWarnings, getProjectedCompletion, getComparison, getReviews, postReview } from '../lib/api';
-import { TrendingUp, BellRing, CalendarClock, Users, CheckCircle, MessageSquare, History, ArrowUpRight, ArrowDownRight, Minus } from 'lucide-react';
+import { getProjectDetails, runRiskAssessment, getRiskHistory, getTrends, getEarlyWarnings, assessCompliance, getCompliance, getComplianceHistory, getPredictiveCompletionRisk, assessPredictiveCompletionRisk, getProjectedCompletion, getComparison, getReviews, postReview } from '../lib/api';
+import { TrendingUp, BellRing, CalendarClock, Users, CheckCircle, MessageSquare, History, ArrowUpRight, ArrowDownRight, Minus, AlertTriangle, ShieldCheck, Activity, AlertCircle, Clock } from 'lucide-react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer } from 'recharts';
 import { TrendChart } from '../components/TrendChart';
 import { RiskBadge } from '../components/RiskBadge';
 import { ProvenanceBadge } from '../components/ProvenanceBadge';
-import { AlertTriangle, ShieldCheck, Activity } from 'lucide-react';
 
 export const ProjectIntelligence = () => {
   const { id } = useParams();
@@ -18,6 +17,7 @@ export const ProjectIntelligence = () => {
   const [trends, setTrends] = useState<any[]>([]);
   const [warnings, setWarnings] = useState<any>(null);
   const [projectedCompletion, setProjectedCompletion] = useState<any>(null);
+  const [predictiveRisk, setPredictiveRisk] = useState<any>(null);
   const [comparison, setComparison] = useState<any>(null);
   const [reviews, setReviews] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
@@ -26,9 +26,10 @@ export const ProjectIntelligence = () => {
 
   useEffect(() => {
     if (id) {
-      getProjectDetails(Number(id)).then(setProject);
-      getCompliance(Number(id)).then(setCompliance).catch(console.error);
-      getRiskHistory(Number(id)).then((res) => {
+      const numId = Number(id);
+      getProjectDetails(numId).then(setProject);
+      getCompliance(numId).then(setCompliance).catch(console.error);
+      getRiskHistory(numId).then((res) => {
         setHistoryResponse(res);
         if (res && res.assessments && res.assessments.length > 0 && !assessment) {
           const latest = res.assessments[0];
@@ -40,12 +41,13 @@ export const ProjectIntelligence = () => {
           });
         }
       }).catch(() => setHistoryResponse(null));
-      getComplianceHistory(Number(id)).then(setComplianceHistory).catch(console.error);
-      getTrends(Number(id)).then(setTrends).catch(() => setTrends([]));
-      getEarlyWarnings(Number(id)).then(setWarnings).catch(console.error);
-      getProjectedCompletion(Number(id)).then(setProjectedCompletion).catch(console.error);
-      getComparison(Number(id)).then(setComparison).catch(console.error);
-      getReviews(Number(id)).then(setReviews).catch(console.error);
+      getComplianceHistory(numId).then(setComplianceHistory).catch(console.error);
+      getTrends(numId).then(setTrends).catch(() => setTrends([]));
+      getEarlyWarnings(numId).then(setWarnings).catch(console.error);
+      getProjectedCompletion(numId).then(setProjectedCompletion).catch(console.error);
+      getPredictiveCompletionRisk(numId).then(setPredictiveRisk).catch(console.error);
+      getComparison(numId).then(setComparison).catch(console.error);
+      getReviews(numId).then(setReviews).catch(console.error);
     }
   }, [id]);
 
@@ -57,7 +59,6 @@ export const ProjectIntelligence = () => {
       await postReview(Number(id), reviewForm);
       setReviewForm({ ...reviewForm, comment: '' });
       getReviews(Number(id)).then(setReviews);
-      // Reload project details to reflect status change
       getProjectDetails(Number(id)).then(setProject);
     } catch (err) {
       console.error(err);
@@ -71,7 +72,6 @@ export const ProjectIntelligence = () => {
     try {
       const res = await runRiskAssessment(Number(id));
       setAssessment(res);
-      // Refresh project to get latest risk saved in DB
       getProjectDetails(Number(id)).then(setProject);
       getRiskHistory(Number(id)).then(setHistoryResponse).catch(() => setHistoryResponse(null));
     } catch (e) {
@@ -98,6 +98,18 @@ export const ProjectIntelligence = () => {
       const { assessEarlyWarnings } = await import('../lib/api');
       const res = await assessEarlyWarnings(Number(id));
       setWarnings(res);
+    } catch (e) {
+      console.error(e);
+    }
+    setLoading(false);
+  };
+
+  const handleRunPredictiveAssessment = async () => {
+    if (!project) return;
+    setLoading(true);
+    try {
+      const res = await assessPredictiveCompletionRisk(project.id);
+      setPredictiveRisk(res);
     } catch (e) {
       console.error(e);
     }
@@ -149,9 +161,16 @@ export const ProjectIntelligence = () => {
               Refresh Compliance
             </button>
             <button 
-              onClick={handleRunAssessment}
+              onClick={handleRunPredictiveAssessment}
               disabled={loading}
               className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-md font-medium shadow-sm transition disabled:opacity-50 text-sm"
+            >
+              Assess Completion Risk
+            </button>
+            <button 
+              onClick={handleRunAssessment}
+              disabled={loading}
+              className="bg-slate-800 hover:bg-slate-900 text-white px-4 py-2 rounded-md font-medium shadow-sm transition disabled:opacity-50 text-sm"
             >
               Run Risk Analysis
             </button>
@@ -295,6 +314,68 @@ export const ProjectIntelligence = () => {
               <h3 className="text-lg font-medium text-gray-900">No Risk Assessment Available</h3>
               <p className="text-gray-500 mt-2">Click "Run Risk Analysis" to process this project through the AI engine.</p>
             </div>
+          )}
+
+          {/* Predictive Completion Risk Card */}
+          {predictiveRisk && predictiveRisk.status === "ASSESSABLE" && (
+            <div className={`p-6 rounded-lg border shadow-sm ${
+              predictiveRisk.risk_level === 'HIGH' || predictiveRisk.risk_level === 'CRITICAL' ? 'bg-red-50 border-red-200' : 
+              predictiveRisk.risk_level === 'MEDIUM' ? 'bg-orange-50 border-orange-200' : 
+              'bg-blue-50 border-blue-200'
+            }`}>
+              <div className="flex justify-between items-start mb-4">
+                <h2 className="text-xl font-bold text-gray-900 flex items-center">
+                  <Clock className="mr-2 h-6 w-6" />
+                  Predictive Completion Risk
+                </h2>
+                <RiskBadge level={predictiveRisk.risk_level} />
+              </div>
+              
+              <div className="flex flex-wrap gap-3 mb-4">
+                <div className="text-xs text-gray-600 bg-white p-2 rounded border border-gray-200 inline-block shadow-sm">
+                   <span className="font-semibold">AI Confidence: </span>
+                   {predictiveRisk.confidence}
+                </div>
+                <div className="text-xs text-gray-600 bg-white p-2 rounded border border-gray-200 inline-block shadow-sm">
+                   <span className="font-semibold">Coverage: </span>
+                   {predictiveRisk.coverage_pct}%
+                </div>
+                <ProvenanceBadge type={predictiveRisk.provenance} />
+              </div>
+
+              <div className="mb-4">
+                 <h3 className="font-bold text-gray-800 mb-2">IDENTIFIED DELAY RISK DRIVERS:</h3>
+                 {predictiveRisk.drivers && predictiveRisk.drivers.length > 0 ? (
+                    <ul className="list-disc pl-5 space-y-1 text-gray-700 text-sm font-medium">
+                      {predictiveRisk.drivers.map((d: string, idx: number) => <li key={idx}>{d}</li>)}
+                    </ul>
+                 ) : (
+                    <p className="text-sm text-gray-700">No significant delay risk drivers detected.</p>
+                 )}
+              </div>
+
+              {predictiveRisk.missing_data && predictiveRisk.missing_data.length > 0 && (
+                 <div className="mt-4 pt-3 border-t border-gray-200 text-xs text-gray-500">
+                    <span className="font-bold">Missing Data Constraints: </span>
+                    {predictiveRisk.missing_data.join(", ")}
+                 </div>
+              )}
+            </div>
+          )}
+
+          {predictiveRisk && predictiveRisk.status === "NOT_ASSESSABLE" && (
+             <div className="p-6 rounded-lg border border-gray-200 bg-gray-50 shadow-sm text-center">
+                <AlertCircle className="mx-auto h-8 w-8 text-gray-400 mb-2" />
+                <h3 className="text-md font-bold text-gray-700">Predictive Completion Risk Not Assessable</h3>
+                <p className="text-sm text-gray-500 mt-2">
+                   Insufficient official data available to confidently predict completion trajectory.
+                </p>
+                {predictiveRisk.missing_data && predictiveRisk.missing_data.length > 0 && (
+                   <div className="mt-3 text-xs text-red-600 bg-white p-2 rounded inline-block border border-red-100">
+                      Missing: {predictiveRisk.missing_data.join(", ")}
+                   </div>
+                )}
+             </div>
           )}
 
           {/* Details Card */}
@@ -512,7 +593,7 @@ export const ProjectIntelligence = () => {
                 {trends.map((t: any, idx: number) => (
                   <TrendChart 
                     key={idx} 
-                    title={t.type === 'expenditure' ? 'Financial Expenditure Trend' : 'Physical Progress Trend (%)'} 
+                    title={t.type === 'expenditure' ? 'Financial Expenditure Trend' : 'Analytical Progress Proxy Trend (%)'} 
                     data={t.data} 
                     color={t.type === 'expenditure' ? '#4f46e5' : '#10b981'} 
                   />

@@ -262,7 +262,7 @@ class TestFinancialChecks:
 
 class TestProgress:
     def test_physical_progress_always_not_assessable(self):
-        """Physical progress is never directly official."""
+        """Analytical Progress Proxy is never directly official."""
         p = _make_project(progress_pct=40)
         r = check_physical_progress_verification(p)
         assert r["status"] == "NOT_ASSESSABLE"

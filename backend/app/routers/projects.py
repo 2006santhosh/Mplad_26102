@@ -76,6 +76,17 @@ def get_projects(include_demo: bool = False, db: Session = Depends(get_db), curr
     for row in ew_rows:
         ew_map[row[0]] = ew_map.get(row[0], 0) + 1
 
+    # Predictive Completion Map
+    pred_rows = db.query(
+        models.PredictiveCompletionAssessment.project_id,
+        models.PredictiveCompletionAssessment.risk_level
+    ).order_by(models.PredictiveCompletionAssessment.created_at.desc()).all()
+    
+    pred_map = {}
+    for row in pred_rows:
+        if row[0] not in pred_map:
+            pred_map[row[0]] = row[1]
+
     results = []
     for p in projects:
         risk_info = risk_map.get(p.id, (None, None))
@@ -104,7 +115,8 @@ def get_projects(include_demo: bool = False, db: Session = Depends(get_db), curr
             progress_proxy_label="Analytical Progress Proxy — derived from official WORK_STAGE",
             latest_risk_score=risk_info[0],
             latest_risk_level=risk_info[1],
-            early_warning_count=ew_map.get(p.id, 0)
+            early_warning_count=ew_map.get(p.id, 0),
+            predictive_risk_level=pred_map.get(p.id)
         ))
     return results
 

@@ -157,7 +157,7 @@ def test_compliance_missing_financial():
 
 
 def test_compliance_completed_missing_progress():
-    """Project 5 is completed without progress → physical progress always NOT_ASSESSABLE."""
+    """Project 5 is completed without progress → Analytical Progress Proxy always NOT_ASSESSABLE."""
     response = client.get("/api/projects/5/compliance/")
     assert response.status_code == 200
     data = response.json()

@@ -455,17 +455,17 @@ def check_gps_verification(project: Dict) -> Dict:
 
 
 def check_physical_progress_verification(project: Dict) -> Dict:
-    """Check 12: Physical progress % is unavailable — proxy is DERIVED."""
+    """Check 12: Analytical Progress Proxy % is unavailable — proxy is DERIVED."""
     r = _base("physical_progress_verification",
-              "Physical Progress Verification",
+              "Analytical Progress Proxy Verification",
               "UNAVAILABLE", ["physical_progress_pct"])
-    # Physical progress percentage is never directly available in official data.
+    # Analytical Progress Proxy percentage is never directly available in official data.
     # The system uses an analytical proxy derived from WORK_STAGE.
     progress = project.get("progress_pct")
     stage = project.get("work_stage") or ""
     r["status"] = "NOT_ASSESSABLE"
     r["severity"] = "NOT_AVAILABLE"
-    r["explanation"] = "Physical progress percentage is unavailable in the official dataset. The system uses an analytical proxy derived from WORK_STAGE."
+    r["explanation"] = "Analytical Progress Proxy percentage is unavailable in the official dataset. The system uses an analytical proxy derived from WORK_STAGE."
     r["provenance"] = "UNAVAILABLE"
     r["evidence"] = {}
     if progress is not None:

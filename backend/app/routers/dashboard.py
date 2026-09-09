@@ -141,6 +141,32 @@ def get_dashboard_stats(db: Session = Depends(get_db), current_user: dict = Depe
         top_categories=top_ew_cats
     )
 
+    pred_high = 0
+    pred_med = 0
+    pred_na = 0
+    
+    # Fast bulk map for predictive assessments
+    pred_rows = db.query(
+        models.PredictiveCompletionAssessment.project_id,
+        models.PredictiveCompletionAssessment.risk_level,
+        models.PredictiveCompletionAssessment.status
+    ).order_by(models.PredictiveCompletionAssessment.created_at.desc()).all()
+    
+    pred_map = {}
+    for row in pred_rows:
+        if row[0] not in pred_map:
+            pred_map[row[0]] = {"level": row[1], "status": row[2]}
+
+    for p in projects:
+        if p.id in pred_map:
+            latest = pred_map[p.id]
+            if latest["status"] == "NOT_ASSESSABLE":
+                pred_na += 1
+            elif latest["level"] in ("HIGH", "CRITICAL"):
+                pred_high += 1
+            elif latest["level"] == "MEDIUM":
+                pred_med += 1
+
     return schemas.DashboardStatsResponse(
         total_projects=total_projects,
         total_sanctioned_amount=total_sanctioned,
@@ -161,5 +187,8 @@ def get_dashboard_stats(db: Session = Depends(get_db), current_user: dict = Depe
         compliance_review_count=compliance_review if compliance_assessed > 0 else None,
         compliance_not_assessable_count=compliance_na if compliance_assessed > 0 else None,
         compliance_assessed_projects=compliance_assessed if compliance_assessed > 0 else None,
-        early_warnings=ew_overview
+        early_warnings=ew_overview,
+        predictive_high_risk=pred_high,
+        predictive_medium_risk=pred_med,
+        predictive_not_assessable=pred_na
     )

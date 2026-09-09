@@ -71,6 +71,7 @@ class Project(Base):
     reviews = relationship("Review", back_populates="project")
     compliance_assessments = relationship("ComplianceAssessment", back_populates="project")
     early_warnings = relationship("EarlyWarning", back_populates="project")
+    predictive_completion_assessments = relationship("PredictiveCompletionAssessment", back_populates="project")
 
     @property
     def source_type(self):
@@ -271,3 +272,21 @@ class EarlyWarning(Base):
     engine_version = Column(String, nullable=False)
 
     project = relationship("Project", back_populates="early_warnings")
+
+class PredictiveCompletionAssessment(Base):
+    __tablename__ = "predictive_completion_assessments"
+    id = Column(Integer, primary_key=True, index=True)
+    project_id = Column(Integer, ForeignKey("projects.id"), nullable=False)
+    status = Column(String, nullable=False) # ASSESSABLE, LIMITED, NOT_ASSESSABLE
+    risk_level = Column(String, nullable=True) # LOW, MEDIUM, HIGH, CRITICAL
+    risk_score = Column(Integer, nullable=True)
+    confidence = Column(String, nullable=True) # LOW, MEDIUM, HIGH
+    coverage_pct = Column(Float, nullable=True)
+    drivers = Column(JSON, nullable=True)
+    evidence = Column(JSON, nullable=True)
+    missing_data = Column(JSON, nullable=True)
+    provenance = Column(String, nullable=False, server_default="AI ASSESSMENT")
+    engine_version = Column(String, nullable=False, default="7.0.0")
+    created_at = Column(DateTime, server_default=func.now())
+
+    project = relationship("Project", back_populates="predictive_completion_assessments")

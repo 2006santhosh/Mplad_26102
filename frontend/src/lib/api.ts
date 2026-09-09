@@ -126,4 +126,14 @@ export const getComplianceHistory = async (projectId: number) => {
   return response.data;
 };
 
+export const getPredictiveCompletionRisk = async (projectId: number) => {
+  const response = await api.get(`/api/projects/${projectId}/predictive-completion`);
+  return response.data;
+};
+
+export const assessPredictiveCompletionRisk = async (projectId: number) => {
+  const response = await api.post(`/api/projects/${projectId}/predictive-completion/assess`);
+  return response.data;
+};
+
 export default api;

@@ -233,6 +233,12 @@ export const Dashboard = () => {
                 </span>
               </div>
               <div className="flex justify-between items-center pb-2 border-b border-gray-100">
+                <span className="text-gray-600">High Predictive Completion Risk</span>
+                <span className="font-bold text-red-600 font-mono">
+                  {stats && stats.predictive_high_risk !== undefined ? stats.predictive_high_risk : 'Loading...'}
+                </span>
+              </div>
+              <div className="flex justify-between items-center pb-2 border-b border-gray-100">
                 <span className="text-gray-600">Human Official Review Logs</span>
                 <span className="font-bold text-indigo-600 font-mono">
                   {stats ? stats.human_review_flags : 'Loading...'}

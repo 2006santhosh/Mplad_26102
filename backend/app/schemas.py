@@ -71,6 +71,10 @@ class DashboardStatsResponse(BaseModel):
     compliance_not_assessable_count: Optional[int] = None
     compliance_assessed_projects: Optional[int] = None
 
+    predictive_high_risk: Optional[int] = None
+    predictive_medium_risk: Optional[int] = None
+    predictive_not_assessable: Optional[int] = None
+
 class EarlyWarningOverview(BaseModel):
     critical: int = 0
     high: int = 0
@@ -127,6 +131,7 @@ class ProjectResponse(ProjectBase):
     latest_risk_level: Optional[str] = None
     description: Optional[str] = None
     provenance: Optional[dict] = None
+    predictive_risk_level: Optional[str] = None
     
     class Config:
         from_attributes = True
@@ -249,6 +254,18 @@ class ProjectedCompletionRiskResponse(BaseModel):
     planned_date: Optional[date] = None
     velocity: Optional[float] = None
     delay_days: Optional[int] = None
+
+class PredictiveCompletionResponse(BaseModel):
+    status: str
+    risk_level: Optional[str] = None
+    risk_score: Optional[int] = None
+    confidence: Optional[str] = None
+    coverage_pct: Optional[float] = None
+    drivers: List[str] = []
+    evidence: dict = {}
+    missing_data: List[str] = []
+    provenance: str = "AI ASSESSMENT"
+    engine_version: str = "7.0.0"
 
 class RiskHistoryAssessment(BaseModel):
     assessment_id: int

@@ -119,7 +119,7 @@ export const ProjectRegister = () => {
               </p>
               <p className="text-xs text-blue-800 mt-0.5">
                 Work-level records fetched from the official MoSPI/eSAKSHI government API.
-                Physical progress is indicated as an{' '}
+                Analytical Progress Proxy is indicated as an{' '}
                 <span className="font-semibold underline">Analytical Progress Proxy</span> derived from official
                 WORK_STAGE categories (Sanction, Vendor Identification, Physical Inspection, Work Completed).
               </p>
@@ -189,6 +189,7 @@ export const ProjectRegister = () => {
                 <th className="px-5 py-3.5">Official Work Stage</th>
                 <th className="px-5 py-3.5">Analytical Proxy %</th>
                 <th className="px-5 py-3.5">AI Risk Signal</th>
+                <th className="px-5 py-3.5">Completion Risk</th>
                 <th className="px-5 py-3.5">Early Warnings</th>
                 <th className="px-5 py-3.5 text-right">Action</th>
               </tr>
