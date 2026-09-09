@@ -91,6 +91,19 @@ export const ProjectIntelligence = () => {
     setLoading(false);
   };
 
+  const handleRunEarlyWarnings = async () => {
+    setLoading(true);
+    try {
+      // Need to import assessEarlyWarnings from api at the top
+      const { assessEarlyWarnings } = await import('../lib/api');
+      const res = await assessEarlyWarnings(Number(id));
+      setWarnings(res);
+    } catch (e) {
+      console.error(e);
+    }
+    setLoading(false);
+  };
+
   if (!project) return <div className="p-8">Loading project...</div>;
 
   return (
@@ -122,6 +135,13 @@ export const ProjectIntelligence = () => {
           </div>
           <div className="flex space-x-2">
             <button 
+              onClick={handleRunEarlyWarnings}
+              disabled={loading}
+              className="bg-amber-600 hover:bg-amber-700 text-white px-4 py-2 rounded-md font-medium shadow-sm transition disabled:opacity-50 text-sm"
+            >
+              Assess Early Warnings
+            </button>
+            <button 
               onClick={handleRunCompliance}
               disabled={loading}
               className="bg-slate-800 hover:bg-slate-900 text-white px-4 py-2 rounded-md font-medium shadow-sm transition disabled:opacity-50 text-sm"
@@ -141,6 +161,56 @@ export const ProjectIntelligence = () => {
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <div className="lg:col-span-2 space-y-6">
+          {/* Early Warning Intelligence */}
+          {warnings && warnings.warnings && warnings.warnings.length > 0 && (
+            <div className="bg-red-50 p-6 rounded-lg border border-red-200 shadow-sm">
+              <div className="flex justify-between items-start mb-4">
+                <h2 className="text-xl font-bold text-red-900 flex items-center">
+                  <AlertTriangle className="mr-2 h-6 w-6 text-red-600" />
+                  Early Warning Intelligence
+                </h2>
+                <span className="text-xs bg-red-100 text-red-800 px-2 py-1 rounded border border-red-200 font-bold uppercase">
+                  Action Required
+                </span>
+              </div>
+              <div className="space-y-4">
+                {warnings.warnings.map((w: any) => (
+                  <div key={w.id} className="bg-white p-4 rounded border border-red-100 shadow-sm">
+                    <div className="flex justify-between items-center mb-2">
+                      <span className={`text-xs font-bold px-2 py-1 rounded uppercase ${
+                        w.warning_level === 'CRITICAL' ? 'bg-red-600 text-white' :
+                        w.warning_level === 'HIGH' ? 'bg-orange-500 text-white' :
+                        w.warning_level === 'MEDIUM' ? 'bg-amber-400 text-gray-900' :
+                        'bg-blue-100 text-blue-800'
+                      }`}>
+                        {w.warning_level}
+                      </span>
+                      <span className="text-xs font-mono text-gray-500">ID: {w.id}</span>
+                    </div>
+                    <h3 className="font-bold text-gray-900">{w.title || w.warning_type.replace(/_/g, ' ')}</h3>
+                    <p className="text-sm text-gray-700 mt-1">{w.explanation}</p>
+                    
+                    <div className="mt-3 flex gap-2 flex-wrap text-xs">
+                      <span className="bg-gray-100 text-gray-600 px-2 py-1 rounded">
+                        Status: <span className="font-bold">{w.status}</span>
+                      </span>
+                      {w.assessment_coverage && (
+                        <span className="bg-gray-100 text-gray-600 px-2 py-1 rounded">
+                          Coverage: <span className="font-bold">{w.assessment_coverage.toFixed(1)}%</span>
+                        </span>
+                      )}
+                      <ProvenanceBadge type={w.provenance || 'AI ASSESSMENT'} />
+                    </div>
+                    
+                    <div className="mt-3 pt-3 border-t border-gray-100 text-xs text-gray-500">
+                      Recommendation: Review supporting project evidence. "AI FLAGS. OFFICIALS DECIDE."
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
           {/* Risk Card */}
           {assessment ? (
             <div className={`p-6 rounded-lg border shadow-sm ${
@@ -282,6 +352,37 @@ export const ProjectIntelligence = () => {
             </div>
           </div>
           
+          {/* Location Card */}
+          <div className="bg-white p-6 rounded-lg border border-gray-200 shadow-sm mt-6">
+            <div className="flex justify-between items-center mb-4">
+              <h2 className="text-lg font-bold text-gray-900 flex items-center">
+                <Activity className="mr-2 h-5 w-5 text-indigo-600" />
+                LOCATION
+              </h2>
+            </div>
+            {project.gps_provenance === 'UNAVAILABLE' ? (
+              <div className="text-sm text-gray-700">
+                <p className="font-semibold text-gray-900 mb-1">GPS: UNAVAILABLE</p>
+                <p>The official dataset does not provide coordinates for this work.</p>
+                <p className="mt-2 italic text-gray-500">[No location fabricated]</p>
+              </div>
+            ) : project.gps_provenance === 'OFFICIAL' ? (
+              <div className="text-sm text-gray-700">
+                <p><span className="font-semibold">Latitude:</span> {project.latitude}</p>
+                <p><span className="font-semibold">Longitude:</span> {project.longitude}</p>
+                <p className="font-semibold text-gray-900 mt-2">GPS: OFFICIAL</p>
+                <button className="mt-3 text-indigo-600 hover:text-indigo-800 font-medium">[View on Map]</button>
+              </div>
+            ) : (
+              <div className="text-sm text-gray-700">
+                <p className="font-semibold text-gray-900 mb-1">GPS: {project.gps_provenance}</p>
+                <p>Coordinates obtained through analytical/external geocoding.</p>
+                <p>Not official source GPS.</p>
+              </div>
+            )}
+          </div>
+          
+
           {/* Compliance Card */}
           {compliance ? (
             <div className="bg-white p-6 rounded-lg border border-gray-200 shadow-sm mt-6">
@@ -430,18 +531,18 @@ export const ProjectIntelligence = () => {
               <div className="space-y-3">
                 {warnings.warnings.map((w: any, idx: number) => (
                   <div key={idx} className={`p-4 rounded border flex items-start ${
-                    w.severity === 'HIGH' ? 'bg-white border-red-300' :
-                    w.severity === 'MEDIUM' ? 'bg-white border-orange-300' :
+                    w.warning_level === 'HIGH' || w.warning_level === 'CRITICAL' ? 'bg-white border-red-300' :
+                    w.warning_level === 'MEDIUM' ? 'bg-white border-orange-300' :
                     'bg-white border-yellow-300'
                   }`}>
                     <div className="mt-1 mr-3">
-                      {w.severity === 'HIGH' ? <div className="h-3 w-3 rounded-full bg-red-600 shadow-sm" /> :
-                       w.severity === 'MEDIUM' ? <div className="h-3 w-3 rounded-full bg-orange-500 shadow-sm" /> :
+                      {w.warning_level === 'CRITICAL' || w.warning_level === 'HIGH' ? <div className="h-3 w-3 rounded-full bg-red-600 shadow-sm" /> :
+                       w.warning_level === 'MEDIUM' ? <div className="h-3 w-3 rounded-full bg-orange-500 shadow-sm" /> :
                        <div className="h-3 w-3 rounded-full bg-yellow-400 shadow-sm" />}
                     </div>
                     <div>
-                      <p className="font-bold text-gray-900 text-sm">{w.type} <span className="text-xs font-normal text-gray-500 ml-2">({w.severity})</span></p>
-                      <p className="text-sm text-gray-700 mt-1">{w.message}</p>
+                      <p className="font-bold text-gray-900 text-sm">{w.title || w.warning_type} <span className="text-xs font-normal text-gray-500 ml-2">({w.warning_level})</span></p>
+                      <p className="text-sm text-gray-700 mt-1">{w.explanation}</p>
                     </div>
                   </div>
                 ))}

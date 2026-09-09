@@ -23,26 +23,38 @@ def override_get_db():
 def override_get_current_user():
     return {"sub": "admin_demo", "role": "Admin"}
 
-app.dependency_overrides[get_db] = override_get_db
-app.dependency_overrides[get_current_user] = override_get_current_user
+import pytest
+
+@pytest.fixture(autouse=True)
+def override_deps():
+    app.dependency_overrides[get_db] = override_get_db
+    app.dependency_overrides[get_current_user] = override_get_current_user
+    yield
+    app.dependency_overrides.clear()
+
+@pytest.fixture
+def test_client(override_deps):
+    return TestClient(app)
 
 client = TestClient(app)
 
 def setup_db():
     db = TestingSessionLocal()
-    proj = models.Project(
-        id=1,
-        mp_id=1,
-        data_source_id=1,
-        description="Test Project Meta",
-        district="Test",
-        status="Ongoing",
-        sanctioned_amount=100.0,
-        latitude=0.0,
-        longitude=0.0
-    )
-    db.add(proj)
-    db.commit()
+    proj = db.query(models.Project).filter(models.Project.id == 1).first()
+    if not proj:
+        proj = models.Project(
+            id=1,
+            mp_id=1,
+            data_source_id=1,
+            description="Test Project Meta",
+            district="Test",
+            status="Ongoing",
+            sanctioned_amount=100.0,
+            latitude=0.0,
+            longitude=0.0
+        )
+        db.add(proj)
+        db.commit()
     return db
 
 def test_engine_version_nullable():

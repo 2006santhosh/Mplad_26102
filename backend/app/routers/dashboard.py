@@ -20,21 +20,21 @@ def get_dashboard_stats(db: Session = Depends(get_db), current_user: dict = Depe
         (models.DataSource.source_type == "OFFICIAL") | (models.DataSource.id.is_(None))
     ).all()
     total_projects = len(projects)
-    
+
     # Financials
     total_sanctioned = 0.0
     total_expenditure = 0.0
-    
+
     for p in projects:
         s_amt = float(p.sanctioned_amount) if p.sanctioned_amount is not None and p.sanctioned_amount > 0 else 0.0
         total_sanctioned += s_amt
-        
+
         exp_records = [float(f.expenditure) for f in p.financials if f.expenditure is not None and f.expenditure >= 0]
         if exp_records:
             total_expenditure += max(exp_records)
-            
+
     utilization_pct = (total_expenditure / total_sanctioned * 100) if total_sanctioned > 0 else None
-    
+
     # Portfolio Progress
     progress_sum = 0.0
     progress_count = 0
@@ -43,13 +43,13 @@ def get_dashboard_stats(db: Session = Depends(get_db), current_user: dict = Depe
         if prog_records:
             progress_sum += max(prog_records)
             progress_count += 1
-            
+
     average_progress = (progress_sum / progress_count) if progress_count > 0 else None
-    
+
     # Risk Distribution & AI Risk Projects
     risk_distribution = {"LOW": 0, "MEDIUM": 0, "HIGH": 0, "CRITICAL": 0, "LIMITED": 0}
     ai_risk_projects = set()
-    
+
     for p in projects:
         if p.risk_assessments:
             latest_assessment = sorted(p.risk_assessments, key=lambda x: x.created_at, reverse=True)[0]
@@ -58,7 +58,7 @@ def get_dashboard_stats(db: Session = Depends(get_db), current_user: dict = Depe
                 risk_distribution[level] += 1
             if level in ["MEDIUM", "HIGH", "CRITICAL"]:
                 ai_risk_projects.add(p.id)
-                
+
     # Human Review Flags
     human_flags = set()
     for p in projects:
@@ -66,13 +66,13 @@ def get_dashboard_stats(db: Session = Depends(get_db), current_user: dict = Depe
             latest_review = sorted(p.review_logs, key=lambda x: x.created_at, reverse=True)[0]
             if latest_review.action == "FLAG":
                 human_flags.add(p.id)
-                
+
     # Delayed Projects
     delayed_projects = set(p.id for p in projects if p.status == "DELAYED")
-    
+
     # Union: Projects Requiring Attention
     attention_projects = ai_risk_projects.union(human_flags).union(delayed_projects)
-    
+
     # Category Breakdown
     categories = defaultdict(lambda: {"count": 0, "amount": 0.0})
     for p in projects:
@@ -80,7 +80,7 @@ def get_dashboard_stats(db: Session = Depends(get_db), current_user: dict = Depe
         amt = float(p.sanctioned_amount) if p.sanctioned_amount is not None and p.sanctioned_amount > 0 else 0.0
         categories[cat]["count"] += 1
         categories[cat]["amount"] += amt
-        
+
     category_stats = []
     for cat, data in categories.items():
         category_stats.append(schemas.DashboardCategoryStat(
@@ -90,12 +90,12 @@ def get_dashboard_stats(db: Session = Depends(get_db), current_user: dict = Depe
         ))
     category_stats.sort(key=lambda x: x.count, reverse=True)
 
-    # Compliance Intelligence Summary — from persisted assessments
+    # Compliance Intelligence Summary
     compliance_pass = 0
     compliance_review = 0
     compliance_na = 0
     compliance_assessed = 0
-    
+
     for p in projects:
         if p.compliance_assessments:
             latest_ca = sorted(p.compliance_assessments, key=lambda x: x.assessed_at, reverse=True)[0]
@@ -108,6 +108,38 @@ def get_dashboard_stats(db: Session = Depends(get_db), current_user: dict = Depe
                 compliance_na += 1
             else:
                 compliance_review += 1  # FAIL also routes to review
+
+    from ..risk_engine.geo_utils import validate_coordinates
+    valid_gps_count = sum(1 for p in projects if validate_coordinates(p.latitude, p.longitude) == 'VALID')
+    gps_coverage = (valid_gps_count / total_projects * 100) if total_projects > 0 else 0.0
+
+    # Early Warnings
+    early_warnings = db.query(models.EarlyWarning).filter(models.EarlyWarning.status == "OPEN").all()
+    ew_critical = ew_high = ew_medium = ew_low = 0
+    ew_categories = {}
+
+    for w in early_warnings:
+        if w.warning_level == "CRITICAL":
+            ew_critical += 1
+        elif w.warning_level == "HIGH":
+            ew_high += 1
+        elif w.warning_level == "MEDIUM":
+            ew_medium += 1
+        elif w.warning_level == "LOW":
+            ew_low += 1
+
+        ew_categories[w.warning_type] = ew_categories.get(w.warning_type, 0) + 1
+
+    top_ew_cats = [{"category": k, "count": v} for k, v in sorted(ew_categories.items(), key=lambda item: item[1], reverse=True)[:3]]
+
+    ew_overview = schemas.EarlyWarningOverview(
+        critical=ew_critical,
+        high=ew_high,
+        medium=ew_medium,
+        low=ew_low,
+        open_total=len(early_warnings),
+        top_categories=top_ew_cats
+    )
 
     return schemas.DashboardStatsResponse(
         total_projects=total_projects,
@@ -122,10 +154,12 @@ def get_dashboard_stats(db: Session = Depends(get_db), current_user: dict = Depe
         human_review_flags=len(human_flags),
         delayed_projects=len(delayed_projects),
         projects_requiring_attention=len(attention_projects),
+        gps_coverage_percentage=gps_coverage,
         risk_distribution=schemas.RiskDistribution(**risk_distribution),
         projects_by_category=category_stats,
         compliance_pass_count=compliance_pass if compliance_assessed > 0 else None,
         compliance_review_count=compliance_review if compliance_assessed > 0 else None,
         compliance_not_assessable_count=compliance_na if compliance_assessed > 0 else None,
         compliance_assessed_projects=compliance_assessed if compliance_assessed > 0 else None,
+        early_warnings=ew_overview
     )

@@ -54,6 +54,7 @@ class Project(Base):
     location = Column(String)
     latitude = Column(Float, nullable=True)
     longitude = Column(Float, nullable=True)
+    gps_provenance = Column(String, nullable=False, server_default="UNAVAILABLE")
     planned_start = Column(Date, nullable=True)
     planned_completion = Column(Date, nullable=True)
     actual_completion = Column(Date, nullable=True)
@@ -69,6 +70,7 @@ class Project(Base):
     review_logs = relationship("ReviewLog", back_populates="project")
     reviews = relationship("Review", back_populates="project")
     compliance_assessments = relationship("ComplianceAssessment", back_populates="project")
+    early_warnings = relationship("EarlyWarning", back_populates="project")
 
     @property
     def source_type(self):
@@ -251,3 +253,21 @@ class ComplianceCheck(Base):
 
     assessment = relationship("ComplianceAssessment", back_populates="checks")
 
+class EarlyWarning(Base):
+    __tablename__ = "early_warnings"
+    id = Column(Integer, primary_key=True, index=True)
+    project_id = Column(Integer, ForeignKey("projects.id"), nullable=False)
+    warning_type = Column(String, nullable=False, index=True)
+    warning_level = Column(String, nullable=False) # INFO, LOW, MEDIUM, HIGH, CRITICAL
+    status = Column(String, nullable=False, default="OPEN", index=True) # OPEN, ACKNOWLEDGED, UNDER_REVIEW, RESOLVED, DISMISSED
+    title = Column(String, nullable=False)
+    explanation = Column(Text, nullable=False)
+    trigger_signature = Column(String, nullable=False, unique=True, index=True)
+    evidence = Column(JSON, nullable=True)
+    provenance = Column(String, nullable=False, server_default="AI ASSESSMENT")
+    assessment_coverage = Column(Float, nullable=True)
+    confidence = Column(Float, nullable=True)
+    detected_at = Column(DateTime, server_default=func.now())
+    engine_version = Column(String, nullable=False)
+
+    project = relationship("Project", back_populates="early_warnings")

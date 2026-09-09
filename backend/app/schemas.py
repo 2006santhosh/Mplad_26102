@@ -1,5 +1,5 @@
 from pydantic import BaseModel, constr, validator
-from typing import List, Optional
+from typing import List, Optional, Dict
 from datetime import date, datetime
 
 class ReviewLogCreate(BaseModel):
@@ -59,15 +59,28 @@ class DashboardStatsResponse(BaseModel):
     human_review_flags: int
     delayed_projects: int
     projects_requiring_attention: int
+    gps_coverage_percentage: Optional[float] = None
     
     risk_distribution: RiskDistribution
     projects_by_category: List[DashboardCategoryStat]
+    early_warnings: Optional["EarlyWarningOverview"] = None
     
     # Compliance Intelligence Summary
     compliance_pass_count: Optional[int] = None
     compliance_review_count: Optional[int] = None
     compliance_not_assessable_count: Optional[int] = None
     compliance_assessed_projects: Optional[int] = None
+
+class EarlyWarningOverview(BaseModel):
+    critical: int = 0
+    high: int = 0
+    medium: int = 0
+    low: int = 0
+    open_total: int = 0
+    top_categories: List[dict] = []
+
+    # Inject into DashboardStatsResponse later
+
 
 class ProjectBase(BaseModel):
     category: Optional[str] = None
@@ -80,6 +93,25 @@ class ProjectBase(BaseModel):
     work_stage: Optional[str] = None
     district: Optional[str] = None
     constituency: Optional[str] = None
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
+    gps_provenance: Optional[str] = "UNAVAILABLE"
+
+class ProjectMapItem(BaseModel):
+    project_id: int
+    latitude: float
+    longitude: float
+    gps_provenance: str
+    risk_level: Optional[str] = None
+    risk_score: Optional[int] = None
+    warning_count: Optional[int] = 0
+
+class MapResponse(BaseModel):
+    projects: List[ProjectMapItem]
+    gps_coverage_percentage: float
+    total_projects: int
+    valid_gps_count: int
+    unavailable_gps_count: int
 
 class ProjectResponse(ProjectBase):
     id: int
@@ -88,6 +120,7 @@ class ProjectResponse(ProjectBase):
     actual_completion: Optional[date] = None
     source_type: Optional[str] = None
     mp_name: Optional[str] = None
+    early_warning_count: Optional[int] = 0
     progress_pct: Optional[int] = None
     progress_proxy_label: Optional[str] = "Analytical Progress Proxy — derived from official WORK_STAGE"
     latest_risk_score: Optional[int] = None
@@ -187,9 +220,19 @@ class TrendResponse(BaseModel):
     source_type: str
 
 class EarlyWarningItem(BaseModel):
-    type: str
-    severity: str # LOW, MEDIUM, HIGH
-    message: str
+    id: int
+    warning_type: str
+    warning_level: str
+    status: str
+    title: str
+    explanation: str
+    trigger_signature: str
+    evidence: Optional[Dict] = None
+    provenance: Optional[str] = None
+    assessment_coverage: Optional[float] = None
+    confidence: Optional[float] = None
+    detected_at: datetime
+    engine_version: str
 
 class EarlyWarningResponse(BaseModel):
     project_id: int

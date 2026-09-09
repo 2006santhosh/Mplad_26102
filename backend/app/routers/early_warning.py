@@ -2,105 +2,90 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from ..database import get_db
 from .. import models, schemas
-from ..auth_utils import get_current_user
-import datetime
+from ..auth_utils import get_current_user, RoleChecker
+from ..risk_engine.early_warning import EarlyWarningEngine
 
-router = APIRouter(prefix="/api/projects/{project_id}/early-warning", tags=["early_warning"])
+router = APIRouter(prefix="/api/projects", tags=["early-warnings"])
 
-@router.get("/", response_model=schemas.EarlyWarningResponse)
-def get_early_warnings(project_id: int, db: Session = Depends(get_db), current_user: dict = Depends(get_current_user)):
+# Active warning statuses — count these as "live" warnings
+ACTIVE_STATUSES = ("OPEN", "ACKNOWLEDGED", "UNDER_REVIEW")
+
+
+def _serialize_warnings(warnings):
+    return [
+        {
+            "id": w.id,
+            "warning_type": w.warning_type,
+            "warning_level": w.warning_level,
+            "status": w.status,
+            "title": w.title,
+            "explanation": w.explanation,
+            "trigger_signature": w.trigger_signature,
+            "evidence": w.evidence,
+            "provenance": w.provenance,
+            "assessment_coverage": w.assessment_coverage,
+            "confidence": w.confidence,
+            "detected_at": w.detected_at,
+            "engine_version": w.engine_version,
+        }
+        for w in warnings
+    ]
+
+
+@router.get("/{project_id}/early-warning", response_model=schemas.EarlyWarningResponse)
+def get_project_warnings(
+    project_id: int,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    """
+    READ-ONLY: returns persisted early warnings for a project.
+    Does NOT run the assessment engine.
+    Does NOT insert, update, or delete any records.
+    Use POST /early-warnings/assess to trigger the engine.
+    """
     p = db.query(models.Project).filter(models.Project.id == project_id).first()
     if not p:
         raise HTTPException(status_code=404, detail="Project not found")
 
-    warnings = []
-    
-    # Get latest progress and financials
-    prog = db.query(models.ProjectProgress).filter(
-        models.ProjectProgress.project_id == project_id
-    ).order_by(models.ProjectProgress.reported_at.desc()).first()
-    
-    fin = db.query(models.ProjectFinancials).filter(
-        models.ProjectFinancials.project_id == project_id
-    ).order_by(models.ProjectFinancials.updated_at.desc()).first()
-    
-    progress_pct = prog.percentage if prog and prog.percentage is not None else None
-    expenditure = float(fin.expenditure) if fin and fin.expenditure is not None else None
-    sanctioned = float(p.sanctioned_amount) if p.sanctioned_amount is not None else None
-
-    # Validate data and generate anomaly warnings
-    valid_progress = False
-    valid_expenditure = False
-    
-    if progress_pct is not None:
-        if 0 <= progress_pct <= 100:
-            valid_progress = True
-        else:
-            warnings.append(schemas.EarlyWarningItem(
-                type="Data Anomaly",
-                severity="LOW",
-                message=f"Invalid physical progress recorded ({progress_pct}%)."
-            ))
-            
-    if expenditure is not None:
-        if expenditure >= 0:
-            valid_expenditure = True
-        else:
-            warnings.append(schemas.EarlyWarningItem(
-                type="Data Anomaly",
-                severity="LOW",
-                message=f"Invalid negative expenditure recorded (₹{expenditure})."
-            ))
-
-    # Check 1: Burn Rate Risk (mutually exclusive)
-    if valid_progress and valid_expenditure and sanctioned is not None and sanctioned > 0:
-        burn_rate = expenditure / sanctioned
-        
-        if burn_rate > 0.8 and progress_pct < 50:
-            warnings.append(schemas.EarlyWarningItem(
-                type="Burn Rate",
-                severity="HIGH",
-                message=f"High fund consumption ({burn_rate*100:.1f}%) with low physical progress ({progress_pct}%)."
-            ))
-        elif burn_rate > 0.9 and progress_pct >= 50 and progress_pct < 80:
-            warnings.append(schemas.EarlyWarningItem(
-                type="Burn Rate",
-                severity="MEDIUM",
-                message=f"Funds nearly exhausted ({burn_rate*100:.1f}%) while project is incomplete ({progress_pct}%)."
-            ))
-
-    # Check 2: Deadline Risk
-    if p.status == "ONGOING" and p.planned_completion:
-        today = datetime.date.today()
-        days_remaining = (p.planned_completion - today).days
-        
-        if days_remaining < 0:
-            warnings.append(schemas.EarlyWarningItem(
-                type="Deadline",
-                severity="HIGH",
-                message=f"Project is overdue by {abs(days_remaining)} days."
-            ))
-        elif days_remaining <= 90:
-            if valid_progress and progress_pct < 70:
-                warnings.append(schemas.EarlyWarningItem(
-                    type="Deadline",
-                    severity="MEDIUM",
-                    message=f"Deadline approaching in {days_remaining} days, but progress is only {progress_pct}%."
-                ))
-
-    # Check 3: Stalled Project
-    if p.status == "ONGOING":
-        if prog and prog.reported_at and valid_progress and progress_pct < 100:
-            days_since_update = (datetime.date.today() - prog.reported_at.date()).days
-            if days_since_update > 180:
-                warnings.append(schemas.EarlyWarningItem(
-                    type="Stagnation",
-                    severity="MEDIUM",
-                    message=f"No progress updates recorded in over 6 months. Project may be stalled."
-                ))
-
+    warnings = (
+        db.query(models.EarlyWarning)
+        .filter(models.EarlyWarning.project_id == project_id)
+        .order_by(models.EarlyWarning.detected_at.desc())
+        .all()
+    )
     return schemas.EarlyWarningResponse(
         project_id=project_id,
-        warnings=warnings,
-        source_type="Early Warning Engine"
+        warnings=_serialize_warnings(warnings),
+        source_type="Early Warning Engine",
+    )
+
+
+@router.post("/{project_id}/early-warnings/assess", response_model=schemas.EarlyWarningResponse)
+def assess_project_warnings(
+    project_id: int,
+    db: Session = Depends(get_db),
+    user: dict = Depends(RoleChecker(["Admin", "Auditor", "State", "District"])),
+):
+    """
+    MUTATING: runs the EarlyWarningEngine for this project, persists new warnings
+    (deduplication via trigger_signature), and returns all current warnings.
+    """
+    p = db.query(models.Project).filter(models.Project.id == project_id).first()
+    if not p:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    engine = EarlyWarningEngine(db)
+    engine.assess_project(project_id)
+
+    warnings = (
+        db.query(models.EarlyWarning)
+        .filter(models.EarlyWarning.project_id == project_id)
+        .order_by(models.EarlyWarning.detected_at.desc())
+        .all()
+    )
+    return schemas.EarlyWarningResponse(
+        project_id=project_id,
+        warnings=_serialize_warnings(warnings),
+        source_type="Early Warning Engine",
     )

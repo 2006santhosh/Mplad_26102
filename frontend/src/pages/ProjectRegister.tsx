@@ -189,6 +189,7 @@ export const ProjectRegister = () => {
                 <th className="px-5 py-3.5">Official Work Stage</th>
                 <th className="px-5 py-3.5">Analytical Proxy %</th>
                 <th className="px-5 py-3.5">AI Risk Signal</th>
+                <th className="px-5 py-3.5">Early Warnings</th>
                 <th className="px-5 py-3.5 text-right">Action</th>
               </tr>
             </thead>
@@ -298,6 +299,18 @@ export const ProjectRegister = () => {
                             </span>
                           </div>
                           <ProvenanceBadge type={p.provenance?.risk_score || 'AI ASSESSMENT'} />
+                        </div>
+                      </td>
+
+                      <td className="px-5 py-4 whitespace-nowrap">
+                        <div className="flex flex-col items-start gap-1">
+                          <span className={`px-2.5 py-0.5 text-xs font-bold rounded-full border ${
+                            p.early_warning_count && p.early_warning_count > 0 
+                              ? 'bg-red-100 text-red-800 border-red-200' 
+                              : 'bg-slate-100 text-slate-600 border-slate-200'
+                          }`}>
+                            {p.early_warning_count || 0} Alerts
+                          </span>
                         </div>
                       </td>
 

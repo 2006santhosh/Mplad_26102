@@ -71,6 +71,11 @@ export const getEarlyWarnings = async (id: number) => {
   return res.data;
 };
 
+export const assessEarlyWarnings = async (id: number) => {
+  const res = await api.post(`/api/projects/${id}/early-warning/assess`);
+  return res.data;
+};
+
 export const getProjectedCompletion = async (id: number) => {
   const res = await api.get(`/api/projected-completion/${id}`);
   return res.data;

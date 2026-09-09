@@ -69,6 +69,13 @@ def get_projects(include_demo: bool = False, db: Session = Depends(get_db), curr
     risk_rows = db.query(models.RiskAssessment.project_id, models.RiskAssessment.score, models.RiskAssessment.overall_risk_level).all()
     risk_map = {row[0]: (row[1], row[2]) for row in risk_rows}
 
+    ew_rows = db.query(models.EarlyWarning.project_id).filter(
+        models.EarlyWarning.status.in_(["OPEN", "ACKNOWLEDGED", "UNDER_REVIEW"])
+    ).all()
+    ew_map = {}
+    for row in ew_rows:
+        ew_map[row[0]] = ew_map.get(row[0], 0) + 1
+
     results = []
     for p in projects:
         risk_info = risk_map.get(p.id, (None, None))
@@ -87,15 +94,64 @@ def get_projects(include_demo: bool = False, db: Session = Depends(get_db), curr
             work_stage=p.work_stage,
             district=p.district,
             constituency=p.constituency,
+            latitude=p.latitude,
+            longitude=p.longitude,
+            gps_provenance=p.gps_provenance,
             description=p.description,
             source_type=p.data_source.source_type if p.data_source else None,
             mp_name=p.mp.name if p.mp else None,
             progress_pct=prog_map.get(p.id),
             progress_proxy_label="Analytical Progress Proxy — derived from official WORK_STAGE",
             latest_risk_score=risk_info[0],
-            latest_risk_level=risk_info[1]
+            latest_risk_level=risk_info[1],
+            early_warning_count=ew_map.get(p.id, 0)
         ))
     return results
+
+@router.get("/map", response_model=schemas.MapResponse)
+def get_map_data(db: Session = Depends(get_db), current_user: dict = Depends(get_current_user)):
+    projects = db.query(models.Project).all()
+    
+    # Fast bulk maps
+    risk_rows = db.query(models.RiskAssessment.project_id, models.RiskAssessment.score, models.RiskAssessment.overall_risk_level).all()
+    risk_map = {row[0]: (row[1], row[2]) for row in risk_rows}
+    
+    # Since we do not have a dedicated warnings table yet, we can mock warning count to 0 or derive it if needed.
+    # In Phase 6, early warnings are usually evaluated on the fly. 
+    # For now we'll just return 0 for map view to avoid N+1 queries.
+    
+    valid_projects = []
+    total_projects = len(projects)
+    valid_gps_count = 0
+    unavailable_gps_count = 0
+    
+    from ..risk_engine.geo_utils import validate_coordinates
+    
+    for p in projects:
+        if validate_coordinates(p.latitude, p.longitude) == 'VALID':
+            valid_gps_count += 1
+            risk_info = risk_map.get(p.id, (None, None))
+            valid_projects.append(schemas.ProjectMapItem(
+                project_id=p.id,
+                latitude=float(p.latitude),
+                longitude=float(p.longitude),
+                gps_provenance=p.gps_provenance,
+                risk_score=risk_info[0],
+                risk_level=risk_info[1],
+                warning_count=0
+            ))
+        else:
+            unavailable_gps_count += 1
+            
+    coverage = (valid_gps_count / total_projects * 100) if total_projects > 0 else 0.0
+    
+    return schemas.MapResponse(
+        projects=valid_projects,
+        gps_coverage_percentage=coverage,
+        total_projects=total_projects,
+        valid_gps_count=valid_gps_count,
+        unavailable_gps_count=unavailable_gps_count
+    )
 
 @router.get("/{project_id}", response_model=schemas.ProjectDetailResponse)
 def get_project(project_id: int, db: Session = Depends(get_db), current_user: dict = Depends(get_current_user)):
@@ -251,7 +307,7 @@ def get_risk_history(project_id: int, db: Session = Depends(get_db), current_use
                 percentage=a.assessment_coverage_pct or 0.0
             ) if a.assessment_coverage_pct is not None else None,
             risk_reasons=a.risk_reasons or [],
-            engine_version=a.engine_version or "Unknown"
+            engine_version=a.engine_version
         ))
         
     indicator_trends = []

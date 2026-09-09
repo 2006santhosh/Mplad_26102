@@ -238,6 +238,12 @@ export const Dashboard = () => {
                   {stats ? stats.human_review_flags : 'Loading...'}
                 </span>
               </div>
+              <div className="flex justify-between items-center pb-2 border-b border-gray-100">
+                <span className="text-gray-600">GPS Coverage (Authentic)</span>
+                <span className="font-bold text-gray-900 font-mono">
+                  {stats && stats.gps_coverage_percentage !== undefined ? `${stats.gps_coverage_percentage.toFixed(1)}%` : 'Loading...'}
+                </span>
+              </div>
               <div className="flex justify-between items-center pt-1">
                 <span className="text-sm font-bold text-gray-900">Total Requiring Attention</span>
                 <span className="font-bold text-xl text-indigo-700 font-mono">
