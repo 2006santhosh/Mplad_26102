@@ -137,3 +137,8 @@ export const assessPredictiveCompletionRisk = async (projectId: number) => {
 };
 
 export default api;
+
+export const getDecisionSupport = async (id: number) => {
+  const res = await api.get(`/api/projects/${id}/decision-support`);
+  return res.data;
+};

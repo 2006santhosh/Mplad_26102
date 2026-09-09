@@ -96,15 +96,26 @@ def get_dashboard_stats(db: Session = Depends(get_db), current_user: dict = Depe
     compliance_na = 0
     compliance_assessed = 0
 
+    # Compliance Map (Bulk to avoid N+1)
+    comp_rows = db.query(
+        models.ComplianceAssessment.project_id,
+        models.ComplianceAssessment.overall_status
+    ).order_by(models.ComplianceAssessment.assessed_at.desc()).all()
+    
+    comp_map = {}
+    for row in comp_rows:
+        if row[0] not in comp_map:
+            comp_map[row[0]] = row[1]
+
     for p in projects:
-        if p.compliance_assessments:
-            latest_ca = sorted(p.compliance_assessments, key=lambda x: x.assessed_at, reverse=True)[0]
+        if p.id in comp_map:
             compliance_assessed += 1
-            if latest_ca.overall_status == "PASS":
+            status = comp_map[p.id]
+            if status == "PASS":
                 compliance_pass += 1
-            elif latest_ca.overall_status in ("REVIEW", "PASS WITH LIMITED COVERAGE"):
+            elif status in ("REVIEW", "PASS WITH LIMITED COVERAGE"):
                 compliance_review += 1
-            elif latest_ca.overall_status == "NOT_ASSESSABLE":
+            elif status == "NOT_ASSESSABLE":
                 compliance_na += 1
             else:
                 compliance_review += 1  # FAIL also routes to review
@@ -157,15 +168,62 @@ def get_dashboard_stats(db: Session = Depends(get_db), current_user: dict = Depe
         if row[0] not in pred_map:
             pred_map[row[0]] = {"level": row[1], "status": row[2]}
 
+    pred_na = 0
+    pred_high = 0
+    pred_med = 0
+    
+    # Priority aggregates
+    pri_crit = pri_high = pri_med = pri_low = 0
+    insufficient_ev = 0
+    
+    # Risk map for priority
+    risk_rows = db.query(models.RiskAssessment.project_id, models.RiskAssessment.overall_risk_level, models.RiskAssessment.assessment_coverage_pct).all()
+    risk_map = {row[0]: (row[1], row[2]) for row in risk_rows}
+    
+    # EW map for priority
+    ew_map = {}
+    for w in early_warnings:
+        ew_map[w.project_id] = ew_map.get(w.project_id, 0) + 1
+
     for p in projects:
+        # Predictive
+        pred_lvl = None
         if p.id in pred_map:
             latest = pred_map[p.id]
+            pred_lvl = latest["level"]
             if latest["status"] == "NOT_ASSESSABLE":
                 pred_na += 1
             elif latest["level"] in ("HIGH", "CRITICAL"):
                 pred_high += 1
             elif latest["level"] == "MEDIUM":
                 pred_med += 1
+                
+        # Calculate Review Priority
+        priority = "LOW"
+        risk_lvl, risk_cov = risk_map.get(p.id, (None, 0.0))
+        comp_status = comp_map.get(p.id, "NOT_ASSESSABLE")
+        ew_count = ew_map.get(p.id, 0)
+
+        if risk_lvl in ["HIGH", "CRITICAL"]:
+            priority = "CRITICAL" if risk_lvl == "CRITICAL" else "HIGH"
+        if comp_status in ["FAIL", "REVIEW"] and priority in ["LOW", "MEDIUM"]:
+            priority = "HIGH"
+        if ew_count > 0 and priority in ["LOW", "MEDIUM"]:
+            priority = "HIGH"
+        if pred_lvl in ["HIGH", "CRITICAL"] and priority in ["LOW", "MEDIUM"]:
+            priority = "HIGH"
+        if priority == "LOW" and risk_lvl == "MEDIUM":
+            priority = "MEDIUM"
+            
+        if risk_cov and risk_cov < 30.0:
+            insufficient_ev += 1
+            if priority == "LOW":
+                priority = "MEDIUM"
+
+        if priority == "CRITICAL": pri_crit += 1
+        elif priority == "HIGH": pri_high += 1
+        elif priority == "MEDIUM": pri_med += 1
+        else: pri_low += 1
 
     return schemas.DashboardStatsResponse(
         total_projects=total_projects,
@@ -190,5 +248,10 @@ def get_dashboard_stats(db: Session = Depends(get_db), current_user: dict = Depe
         early_warnings=ew_overview,
         predictive_high_risk=pred_high,
         predictive_medium_risk=pred_med,
-        predictive_not_assessable=pred_na
+        predictive_not_assessable=pred_na,
+        review_priority_critical=pri_crit,
+        review_priority_high=pri_high,
+        review_priority_medium=pri_med,
+        review_priority_low=pri_low,
+        insufficient_evidence_projects=insufficient_ev
     )

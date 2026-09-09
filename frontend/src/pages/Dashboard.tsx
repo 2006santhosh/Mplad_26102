@@ -158,42 +158,42 @@ export const Dashboard = () => {
             <div className="flex items-center justify-between mb-4">
               <h2 className="text-base font-bold text-gray-900 flex items-center gap-2">
                 <BarChart3 className="w-5 h-5 text-indigo-600" />
-                AI Risk Flags (Official Works)
+                Portfolio Decision Support
               </h2>
               <span className="text-xs font-semibold text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded border border-indigo-100">
-                AI Assessment
+                Action Required
               </span>
             </div>
 
-            {stats && stats.risk_distribution ? (
+            {stats ? (
               <div className="grid grid-cols-2 gap-3">
-                <div className="bg-emerald-50/80 p-3 rounded-lg border border-emerald-200 flex flex-col items-center">
-                  <span className="text-[11px] font-bold text-emerald-800 uppercase tracking-wider">LOW</span>
-                  <span className="text-2xl font-black text-emerald-900 mt-1 font-mono">
-                    {stats.risk_distribution.LOW}
+                <div className="bg-red-50/80 p-3 rounded-lg border border-red-200 flex flex-col items-center">
+                  <span className="text-[11px] font-bold text-red-800 uppercase tracking-wider">CRITICAL PRIORITY</span>
+                  <span className="text-2xl font-black text-red-900 mt-1 font-mono">
+                    {stats.review_priority_critical || 0}
                   </span>
-                  <span className="text-[10px] text-emerald-700">Normal Parameters</span>
-                </div>
-                <div className="bg-amber-50/80 p-3 rounded-lg border border-amber-200 flex flex-col items-center">
-                  <span className="text-[11px] font-bold text-amber-800 uppercase tracking-wider">MEDIUM</span>
-                  <span className="text-2xl font-black text-amber-900 mt-1 font-mono">
-                    {stats.risk_distribution.MEDIUM}
-                  </span>
-                  <span className="text-[10px] text-amber-700">Minor Variance</span>
+                  <span className="text-[10px] text-red-700">Immediate Official Review</span>
                 </div>
                 <div className="bg-orange-50/80 p-3 rounded-lg border border-orange-200 flex flex-col items-center">
-                  <span className="text-[11px] font-bold text-orange-800 uppercase tracking-wider">HIGH</span>
+                  <span className="text-[11px] font-bold text-orange-800 uppercase tracking-wider">HIGH PRIORITY</span>
                   <span className="text-2xl font-black text-orange-900 mt-1 font-mono">
-                    {stats.risk_distribution.HIGH}
+                    {stats.review_priority_high || 0}
                   </span>
-                  <span className="text-[10px] text-orange-700">Review Recommended</span>
+                  <span className="text-[10px] text-orange-700">Needs Investigation</span>
                 </div>
-                <div className="bg-red-50/80 p-3 rounded-lg border border-red-200 flex flex-col items-center">
-                  <span className="text-[11px] font-bold text-red-800 uppercase tracking-wider">CRITICAL</span>
-                  <span className="text-2xl font-black text-red-900 mt-1 font-mono">
-                    {stats.risk_distribution.CRITICAL}
+                <div className="bg-amber-50/80 p-3 rounded-lg border border-amber-200 flex flex-col items-center">
+                  <span className="text-[11px] font-bold text-amber-800 uppercase tracking-wider">COMPLIANCE REVIEW</span>
+                  <span className="text-2xl font-black text-amber-900 mt-1 font-mono">
+                    {stats.compliance_review_count || 0}
                   </span>
-                  <span className="text-[10px] text-red-700">Priority Review</span>
+                  <span className="text-[10px] text-amber-700">Guidelines Flagged</span>
+                </div>
+                <div className="bg-gray-50/80 p-3 rounded-lg border border-gray-200 flex flex-col items-center">
+                  <span className="text-[11px] font-bold text-gray-800 uppercase tracking-wider">LIMITED DATA</span>
+                  <span className="text-2xl font-black text-gray-900 mt-1 font-mono">
+                    {stats.insufficient_evidence_projects || 0}
+                  </span>
+                  <span className="text-[10px] text-gray-700">Missing Evidence</span>
                 </div>
               </div>
             ) : (

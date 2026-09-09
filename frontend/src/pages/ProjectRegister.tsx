@@ -2,15 +2,15 @@ import { useEffect, useState, useMemo } from 'react';
 import { getProjects } from '../lib/api';
 import { Link } from 'react-router-dom';
 import { 
+  ShieldCheck, 
   Search, 
   Filter, 
-  ShieldCheck, 
-  ChevronLeft, 
-  ChevronRight, 
+  ChevronLeft,
+  ChevronRight,
   Building2, 
   Clock, 
   Info, 
-  ExternalLink
+  ExternalLink 
 } from 'lucide-react';
 import { ProvenanceBadge } from '../components/ProvenanceBadge';
 
@@ -188,7 +188,7 @@ export const ProjectRegister = () => {
                 <th className="px-5 py-3.5">Sanctioned Amount</th>
                 <th className="px-5 py-3.5">Official Work Stage</th>
                 <th className="px-5 py-3.5">Analytical Proxy %</th>
-                <th className="px-5 py-3.5">AI Risk Signal</th>
+                <th className="px-5 py-3.5">Review Priority</th>
                 <th className="px-5 py-3.5">Completion Risk</th>
                 <th className="px-5 py-3.5">Early Warnings</th>
                 <th className="px-5 py-3.5 text-right">Action</th>
@@ -212,8 +212,8 @@ export const ProjectRegister = () => {
                 </tr>
               ) : (
                 paginatedProjects.map((p) => {
-                  const riskLevel = p.latest_risk_level || 'LOW';
-                  const riskScore = p.latest_risk_score ?? 'Not Assessable';
+                  const priorityLevel = p.review_priority_level || 'LOW';
+
 
                   return (
                     <tr key={p.id} className="hover:bg-slate-50/70 transition-colors">
@@ -287,16 +287,16 @@ export const ProjectRegister = () => {
                           <div className="flex items-center gap-1.5">
                             <span
                               className={`px-2.5 py-0.5 text-xs font-bold rounded-full border ${
-                                riskLevel === 'CRITICAL'
+                                priorityLevel === 'CRITICAL'
                                   ? 'bg-red-100 text-red-800 border-red-200'
-                                  : riskLevel === 'HIGH'
+                                  : priorityLevel === 'HIGH'
                                   ? 'bg-orange-100 text-orange-800 border-orange-200'
-                                  : riskLevel === 'MEDIUM'
+                                  : priorityLevel === 'MEDIUM'
                                   ? 'bg-amber-100 text-amber-800 border-amber-200'
-                                  : 'bg-emerald-100 text-emerald-800 border-emerald-200'
+                                  : 'bg-slate-100 text-slate-800 border-slate-200'
                               }`}
                             >
-                              {riskLevel} ({riskScore})
+                              {priorityLevel}
                             </span>
                           </div>
                           <ProvenanceBadge type={p.provenance?.risk_score || 'AI ASSESSMENT'} />

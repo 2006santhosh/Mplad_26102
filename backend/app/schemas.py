@@ -74,6 +74,12 @@ class DashboardStatsResponse(BaseModel):
     predictive_high_risk: Optional[int] = None
     predictive_medium_risk: Optional[int] = None
     predictive_not_assessable: Optional[int] = None
+    
+    review_priority_critical: Optional[int] = None
+    review_priority_high: Optional[int] = None
+    review_priority_medium: Optional[int] = None
+    review_priority_low: Optional[int] = None
+    insufficient_evidence_projects: Optional[int] = None
 
 class EarlyWarningOverview(BaseModel):
     critical: int = 0
@@ -132,6 +138,7 @@ class ProjectResponse(ProjectBase):
     description: Optional[str] = None
     provenance: Optional[dict] = None
     predictive_risk_level: Optional[str] = None
+    review_priority_level: Optional[str] = "LOW"
     
     class Config:
         from_attributes = True
@@ -146,6 +153,7 @@ class ProjectDetailResponse(ProjectResponse):
     work_category: Optional[str] = None
     progress_proxy_label: Optional[str] = "Analytical Progress Proxy — derived from official WORK_STAGE"
     provenance: Optional[dict] = None
+    review_priority_level: Optional[str] = "LOW"
 
 class RiskIndicatorSchema(BaseModel):
     indicator: str
@@ -350,3 +358,43 @@ class GISResponse(BaseModel):
     clusters: List[GISCluster]
     total_valid_projects: int
 
+
+class TimelineEvent(BaseModel):
+    date: date
+    event_type: str # e.g. 'Sanction recorded', 'Risk assessment', 'Early warning generated'
+    description: str
+    provenance: str
+
+class FlagReason(BaseModel):
+    signal_type: str
+    severity: str
+    explanation: str
+    evidence: dict
+    provenance: str
+    confidence: Optional[str] = None
+
+class DataQuality(BaseModel):
+    gps_coverage: str
+    analytical_progress_coverage: str
+    financial_data_coverage: str
+    contractor_information_coverage: str
+    risk_history_coverage: str
+    compliance_coverage: str
+
+class ReviewPriority(BaseModel):
+    level: str # LOW, MEDIUM, HIGH, CRITICAL
+    contributing_signals: List[str]
+    why_flagged: List[FlagReason]
+    evidence_coverage: float
+
+class DecisionSupportResponse(BaseModel):
+    project_id: int
+    overall_risk: dict
+    risk_trend: dict
+    compliance: dict
+    early_warnings: List[dict]
+    completion_risk: dict
+    review_priority: ReviewPriority
+    data_quality: DataQuality
+    timeline: List[TimelineEvent]
+    provenance: dict

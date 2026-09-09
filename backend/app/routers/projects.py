@@ -87,10 +87,21 @@ def get_projects(include_demo: bool = False, db: Session = Depends(get_db), curr
         if row[0] not in pred_map:
             pred_map[row[0]] = row[1]
 
+    # Compliance Map
+    comp_rows = db.query(
+        models.ComplianceAssessment.project_id,
+        models.ComplianceAssessment.overall_status
+    ).order_by(models.ComplianceAssessment.assessed_at.desc()).all()
+    
+    comp_map = {}
+    for row in comp_rows:
+        if row[0] not in comp_map:
+            comp_map[row[0]] = row[1]
+
     results = []
     for p in projects:
         risk_info = risk_map.get(p.id, (None, None))
-        results.append(schemas.ProjectResponse(
+        resp = schemas.ProjectResponse(
             id=p.id,
             mp_id=p.mp_id,
             data_source_id=p.data_source_id,
@@ -117,7 +128,28 @@ def get_projects(include_demo: bool = False, db: Session = Depends(get_db), curr
             latest_risk_level=risk_info[1],
             early_warning_count=ew_map.get(p.id, 0),
             predictive_risk_level=pred_map.get(p.id)
-        ))
+        )
+        
+        # Calculate Review Priority
+        priority = "LOW"
+        risk_lvl = risk_info[1]
+        comp_status = comp_map.get(p.id, "NOT_ASSESSABLE")
+        ew_count = ew_map.get(p.id, 0)
+        pred_lvl = pred_map.get(p.id)
+
+        if risk_lvl in ["HIGH", "CRITICAL"]:
+            priority = "CRITICAL" if risk_lvl == "CRITICAL" else "HIGH"
+        if comp_status in ["FAIL", "REVIEW"] and priority in ["LOW", "MEDIUM"]:
+            priority = "HIGH"
+        if ew_count > 0 and priority in ["LOW", "MEDIUM"]:
+            priority = "HIGH"
+        if pred_lvl in ["HIGH", "CRITICAL"] and priority in ["LOW", "MEDIUM"]:
+            priority = "HIGH"
+        if priority == "LOW" and risk_lvl == "MEDIUM":
+            priority = "MEDIUM"
+
+        resp.review_priority_level = priority
+        results.append(resp)
     return results
 
 @router.get("/map", response_model=schemas.MapResponse)
