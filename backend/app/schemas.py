@@ -56,6 +56,8 @@ class DashboardStatsResponse(BaseModel):
     average_progress: Optional[float] = None
     
     ai_risk_projects: int
+    ai_risk_signal_total: int = 0
+    ai_risk_signal_breakdown: Optional[List[dict]] = None
     human_review_flags: int
     delayed_projects: int
     projects_requiring_attention: int
@@ -144,8 +146,8 @@ class ProjectResponse(ProjectBase):
         from_attributes = True
 
 class ProjectDetailResponse(ProjectResponse):
-    progress_pct: Optional[int] = 0
-    expenditure: Optional[float] = 0.0
+    progress_pct: Optional[int] = None
+    expenditure: Optional[float] = None
     latest_risk_score: Optional[int] = None
     latest_risk_level: Optional[str] = None
     source_type: Optional[str] = None
@@ -166,17 +168,17 @@ class RiskIndicatorSchema(BaseModel):
     data_provenance: str
 
 class AssessmentCoverage(BaseModel):
-    assessable: int
-    total: int
-    percentage: float
+    assessable: Optional[int] = None
+    total: Optional[int] = None
+    percentage: Optional[float] = None
 
 class RiskAssessmentResponse(BaseModel):
     score: Optional[int] = None
     level: str
     assessment_status: str
-    assessment_coverage: AssessmentCoverage
-    assessable_indicator_count: int
-    total_indicator_count: int
+    assessment_coverage: Optional[AssessmentCoverage] = None
+    assessable_indicator_count: Optional[int] = None
+    total_indicator_count: Optional[int] = None
     risk_reasons: List[str]
     indicators: List[RiskIndicatorSchema]
 
@@ -213,12 +215,12 @@ class ComplianceCheckSchema(BaseModel):
 class ComplianceAssessmentResponse(BaseModel):
     project_id: int
     overall_status: str
-    coverage_percentage: float
-    pass_count: int
-    review_count: int
-    not_assessable_count: int
-    fail_count: int
-    total_checks: int
+    coverage_percentage: Optional[float] = None
+    pass_count: Optional[int] = None
+    review_count: Optional[int] = None
+    not_assessable_count: Optional[int] = None
+    fail_count: Optional[int] = None
+    total_checks: Optional[int] = None
     checks: List[ComplianceCheckSchema]
     engine_version: Optional[str] = None
 
@@ -385,7 +387,7 @@ class ReviewPriority(BaseModel):
     level: str # LOW, MEDIUM, HIGH, CRITICAL
     contributing_signals: List[str]
     why_flagged: List[FlagReason]
-    evidence_coverage: float
+    evidence_coverage: Optional[float] = None
 
 class DecisionSupportResponse(BaseModel):
     project_id: int

@@ -1,10 +1,6 @@
 from fastapi import FastAPI
-from . import models
-from .database import engine
 from fastapi.middleware.cors import CORSMiddleware
 from .routers import projects, pre_sanction, auth, compliance, trends, early_warning, projected_completion, predictive_completion, comparison, gis, review, dashboard, decision_support, review_cases
-
-models.Base.metadata.create_all(bind=engine)
 
 app = FastAPI(title="SIH26102 MPLAD Risk Intelligence API", version="1.0.0")
 

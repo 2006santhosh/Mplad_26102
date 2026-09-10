@@ -52,7 +52,7 @@ export const getProjectDetails = async (id: number) => {
 };
 
 export const runRiskAssessment = async (id: number) => {
-  const res = await api.get(`/api/projects/${id}/risk`);
+  const res = await api.post(`/api/projects/${id}/risk`);
   return res.data;
 };
 
@@ -72,7 +72,7 @@ export const getEarlyWarnings = async (id: number) => {
 };
 
 export const assessEarlyWarnings = async (id: number) => {
-  const res = await api.post(`/api/projects/${id}/early-warning/assess`);
+  const res = await api.post(`/api/projects/${id}/early-warnings/assess`);
   return res.data;
 };
 

@@ -1,11 +1,12 @@
-from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy.orm import Session
+from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy.orm import Session, joinedload
 import pandas as pd
 from ..database import get_db
 from .. import models, schemas
 from ..auth_utils import get_current_user, RoleChecker
 from ..risk_engine.aggregator import RiskAggregator
 from ..risk_engine.trend_analyzer import TrendAnalyzer
+from ..services.review_priority import calculate_review_priority
 from datetime import date, datetime
 
 CURRENT_RISK_ENGINE_VERSION = "5.0.0"
@@ -13,22 +14,44 @@ CURRENT_RISK_ENGINE_VERSION = "5.0.0"
 router = APIRouter(prefix="/api/projects", tags=["projects"])
 
 def _get_project_context(db: Session):
-    projects = db.query(models.Project).all()
+    projects = db.query(models.Project).options(joinedload(models.Project.mp)).all()
+
+    progress_rows = db.query(
+        models.ProjectProgress.project_id,
+        models.ProjectProgress.percentage,
+    ).order_by(
+        models.ProjectProgress.reported_at.desc(),
+        models.ProjectProgress.id.desc(),
+    ).all()
+    progress_map = {}
+    for row in progress_rows:
+        if row.project_id not in progress_map:
+            progress_map[row.project_id] = row.percentage
+
+    financial_rows = db.query(
+        models.ProjectFinancials.project_id,
+        models.ProjectFinancials.expenditure,
+    ).order_by(
+        models.ProjectFinancials.updated_at.desc(),
+        models.ProjectFinancials.id.desc(),
+    ).all()
+    financial_map = {}
+    for row in financial_rows:
+        if row.project_id not in financial_map:
+            financial_map[row.project_id] = row.expenditure
     
     data = []
     for p in projects:
-        prog = db.query(models.ProjectProgress).filter(models.ProjectProgress.project_id == p.id).order_by(models.ProjectProgress.reported_at.desc()).first()
-        prog_pct = prog.percentage if prog else 0
-        fin = db.query(models.ProjectFinancials).filter(models.ProjectFinancials.project_id == p.id).order_by(models.ProjectFinancials.updated_at.desc()).first()
-        exp = fin.expenditure if fin else 0.0
+        prog_pct = progress_map.get(p.id)
+        exp = financial_map.get(p.id)
         
         data.append({
             'id': p.id,
             'category': p.category,
-            'sanctioned_amount': float(p.sanctioned_amount or 0),
+            'sanctioned_amount': float(p.sanctioned_amount) if p.sanctioned_amount is not None else None,
             'location': p.location or "",
             'progress_pct': prog_pct,
-            'expenditure': float(exp),
+            'expenditure': float(exp) if exp is not None else None,
             'planned_completion': p.planned_completion,
             'actual_completion': p.actual_completion,
             'status': p.status,
@@ -39,8 +62,8 @@ def _get_project_context(db: Session):
             'latitude': p.latitude,
             'longitude': p.longitude,
             'mp_name': p.mp.name if p.mp else None,
-            'expenditure_pct': (float(exp) / float(p.sanctioned_amount) * 100) if p.sanctioned_amount else 0,
-            'delay_days': (date.today() - p.planned_completion).days if p.planned_completion and p.status != 'COMPLETED' else 0
+            'expenditure_pct': (float(exp) / float(p.sanctioned_amount) * 100) if exp is not None and p.sanctioned_amount else None,
+            'delay_days': (date.today() - p.planned_completion).days if p.planned_completion and p.status != 'COMPLETED' else None
         })
     df_projects = pd.DataFrame(data)
     
@@ -56,18 +79,35 @@ def _get_project_context(db: Session):
 @router.get("", response_model=list[schemas.ProjectResponse])
 @router.get("/", response_model=list[schemas.ProjectResponse])
 def get_projects(include_demo: bool = False, db: Session = Depends(get_db), current_user: dict = Depends(get_current_user)):
-    query = db.query(models.Project)
+    query = db.query(models.Project).options(
+        joinedload(models.Project.mp),
+        joinedload(models.Project.data_source),
+    )
     if not include_demo:
         query = query.join(models.DataSource).filter(models.DataSource.source_type == "OFFICIAL")
     
     projects = query.all()
     
     # Fast bulk maps for 1-query performance across thousands of official works
-    progress_rows = db.query(models.ProjectProgress.project_id, models.ProjectProgress.percentage).all()
-    prog_map = {row[0]: row[1] for row in progress_rows}
+    progress_rows = db.query(
+        models.ProjectProgress.project_id,
+        models.ProjectProgress.percentage,
+    ).order_by(
+        models.ProjectProgress.reported_at.desc(),
+        models.ProjectProgress.id.desc(),
+    ).all()
+    prog_map = {}
+    for row in progress_rows:
+        if row[0] not in prog_map:
+            prog_map[row[0]] = row[1]
     
-    risk_rows = db.query(models.RiskAssessment.project_id, models.RiskAssessment.score, models.RiskAssessment.overall_risk_level).all()
-    risk_map = {row[0]: (row[1], row[2]) for row in risk_rows}
+    risk_rows = db.query(models.RiskAssessment.project_id, models.RiskAssessment.score, models.RiskAssessment.overall_risk_level, models.RiskAssessment.assessment_coverage_pct).order_by(
+        models.RiskAssessment.created_at.desc(), models.RiskAssessment.id.desc()
+    ).all()
+    risk_map = {}
+    for row in risk_rows:
+        if row[0] not in risk_map:
+            risk_map[row[0]] = (row[1], row[2], row[3])
 
     ew_rows = db.query(models.EarlyWarning.project_id).filter(
         models.EarlyWarning.status.in_(["OPEN", "ACKNOWLEDGED", "UNDER_REVIEW"])
@@ -80,7 +120,10 @@ def get_projects(include_demo: bool = False, db: Session = Depends(get_db), curr
     pred_rows = db.query(
         models.PredictiveCompletionAssessment.project_id,
         models.PredictiveCompletionAssessment.risk_level
-    ).order_by(models.PredictiveCompletionAssessment.created_at.desc()).all()
+    ).order_by(
+        models.PredictiveCompletionAssessment.created_at.desc(),
+        models.PredictiveCompletionAssessment.id.desc(),
+    ).all()
     
     pred_map = {}
     for row in pred_rows:
@@ -91,7 +134,10 @@ def get_projects(include_demo: bool = False, db: Session = Depends(get_db), curr
     comp_rows = db.query(
         models.ComplianceAssessment.project_id,
         models.ComplianceAssessment.overall_status
-    ).order_by(models.ComplianceAssessment.assessed_at.desc()).all()
+    ).order_by(
+        models.ComplianceAssessment.assessed_at.desc(),
+        models.ComplianceAssessment.id.desc(),
+    ).all()
     
     comp_map = {}
     for row in comp_rows:
@@ -100,7 +146,7 @@ def get_projects(include_demo: bool = False, db: Session = Depends(get_db), curr
 
     results = []
     for p in projects:
-        risk_info = risk_map.get(p.id, (None, None))
+        risk_info = risk_map.get(p.id, (None, None, None))
         resp = schemas.ProjectResponse(
             id=p.id,
             mp_id=p.mp_id,
@@ -127,38 +173,44 @@ def get_projects(include_demo: bool = False, db: Session = Depends(get_db), curr
             latest_risk_score=risk_info[0],
             latest_risk_level=risk_info[1],
             early_warning_count=ew_map.get(p.id, 0),
-            predictive_risk_level=pred_map.get(p.id)
+            predictive_risk_level=pred_map.get(p.id),
+            provenance={
+                "sanctioned_amount": p.data_source.source_type if p.sanctioned_amount is not None and p.data_source else "UNAVAILABLE",
+                "work_stage": p.data_source.source_type if p.work_stage and p.data_source else "UNAVAILABLE",
+                "physical_progress": "DERIVED" if prog_map.get(p.id) is not None and p.source_type == "OFFICIAL" else ("SYNTHETIC" if prog_map.get(p.id) is not None else "UNAVAILABLE"),
+                "risk_score": "AI ASSESSMENT" if risk_info[0] is not None else "UNAVAILABLE",
+            }
         )
         
-        # Calculate Review Priority
-        priority = "LOW"
-        risk_lvl = risk_info[1]
         comp_status = comp_map.get(p.id, "NOT_ASSESSABLE")
         ew_count = ew_map.get(p.id, 0)
         pred_lvl = pred_map.get(p.id)
 
-        if risk_lvl in ["HIGH", "CRITICAL"]:
-            priority = "CRITICAL" if risk_lvl == "CRITICAL" else "HIGH"
-        if comp_status in ["FAIL", "REVIEW"] and priority in ["LOW", "MEDIUM"]:
-            priority = "HIGH"
-        if ew_count > 0 and priority in ["LOW", "MEDIUM"]:
-            priority = "HIGH"
-        if pred_lvl in ["HIGH", "CRITICAL"] and priority in ["LOW", "MEDIUM"]:
-            priority = "HIGH"
-        if priority == "LOW" and risk_lvl == "MEDIUM":
-            priority = "MEDIUM"
-
-        resp.review_priority_level = priority
+        priority = calculate_review_priority(
+            overall_risk={"level": risk_info[1], "score": risk_info[0], "coverage": risk_info[2]},
+            risk_trend={"trend": "STABLE", "explanation": "Risk levels have remained stable."},
+            compliance={"status": comp_status},
+            open_warnings=[{"level": "LOW"}] * ew_count,
+            completion_risk={"level": pred_lvl, "confidence": None},
+        )
+        resp.review_priority_level = priority["level"]
         results.append(resp)
     return results
 
 @router.get("/map", response_model=schemas.MapResponse)
 def get_map_data(db: Session = Depends(get_db), current_user: dict = Depends(get_current_user)):
-    projects = db.query(models.Project).all()
+    projects = db.query(models.Project).join(models.DataSource).filter(
+        models.DataSource.source_type == "OFFICIAL"
+    ).all()
     
     # Fast bulk maps
-    risk_rows = db.query(models.RiskAssessment.project_id, models.RiskAssessment.score, models.RiskAssessment.overall_risk_level).all()
-    risk_map = {row[0]: (row[1], row[2]) for row in risk_rows}
+    risk_rows = db.query(models.RiskAssessment.project_id, models.RiskAssessment.score, models.RiskAssessment.overall_risk_level).order_by(
+        models.RiskAssessment.created_at.desc(), models.RiskAssessment.id.desc()
+    ).all()
+    risk_map = {}
+    for row in risk_rows:
+        if row[0] not in risk_map:
+            risk_map[row[0]] = (row[1], row[2])
     
     # Since we do not have a dedicated warnings table yet, we can mock warning count to 0 or derive it if needed.
     # In Phase 6, early warnings are usually evaluated on the fly. 
@@ -203,9 +255,9 @@ def get_project(project_id: int, db: Session = Depends(get_db), current_user: di
     if not p:
         raise HTTPException(status_code=404, detail="Project not found")
         
-    prog = db.query(models.ProjectProgress).filter(models.ProjectProgress.project_id == project_id).order_by(models.ProjectProgress.reported_at.desc()).first()
-    fin = db.query(models.ProjectFinancials).filter(models.ProjectFinancials.project_id == project_id).order_by(models.ProjectFinancials.updated_at.desc()).first()
-    risk = db.query(models.RiskAssessment).filter(models.RiskAssessment.project_id == project_id).order_by(models.RiskAssessment.created_at.desc()).first()
+    prog = db.query(models.ProjectProgress).filter(models.ProjectProgress.project_id == project_id).order_by(models.ProjectProgress.reported_at.desc(), models.ProjectProgress.id.desc()).first()
+    fin = db.query(models.ProjectFinancials).filter(models.ProjectFinancials.project_id == project_id).order_by(models.ProjectFinancials.updated_at.desc(), models.ProjectFinancials.id.desc()).first()
+    risk = db.query(models.RiskAssessment).filter(models.RiskAssessment.project_id == project_id).order_by(models.RiskAssessment.created_at.desc(), models.RiskAssessment.id.desc()).first()
 
     return schemas.ProjectDetailResponse(
         id=p.id, mp_id=p.mp_id, data_source_id=p.data_source_id,
@@ -220,16 +272,15 @@ def get_project(project_id: int, db: Session = Depends(get_db), current_user: di
         description=p.description,
         work_category=p.work_category,
         mp_name=p.mp.name if p.mp else None,
-        progress_pct=prog.percentage if prog else 0,
+        progress_pct=prog.percentage if prog else None,
         progress_proxy_label="Analytical Progress Proxy — derived from official WORK_STAGE",
-        expenditure=float(fin.expenditure) if fin else 0.0,
+        expenditure=float(fin.expenditure) if fin and fin.expenditure is not None else None,
         latest_risk_score=risk.score if risk else None,
         latest_risk_level=risk.overall_risk_level if risk else None,
         source_type=p.data_source.source_type if p.data_source else None
     )
 
-@router.get("/{project_id}/risk", response_model=schemas.RiskAssessmentResponse)
-def run_project_risk(project_id: int, db: Session = Depends(get_db), user: dict = Depends(RoleChecker(['Admin', 'Auditor', 'State', 'District']))):
+def _calculate_and_persist_risk(project_id: int, db: Session) -> schemas.RiskAssessmentResponse:
     p = db.query(models.Project).filter(models.Project.id == project_id).first()
     if not p:
         raise HTTPException(status_code=404, detail="Project not found")
@@ -258,8 +309,7 @@ def run_project_risk(project_id: int, db: Session = Depends(get_db), user: dict 
         engine_version=CURRENT_RISK_ENGINE_VERSION
     )
     db.add(ra)
-    db.commit()
-    db.refresh(ra)
+    db.flush()
     
     for ind in res['indicators']:
         ri = models.RiskIndicator(
@@ -274,7 +324,15 @@ def run_project_risk(project_id: int, db: Session = Depends(get_db), user: dict 
             data_provenance=ind.get('data_provenance', 'UNAVAILABLE')
         )
         db.add(ri)
+
+    db.add(models.RiskHistory(
+        project_id=project_id,
+        risk_score=res['score'],
+        risk_level=res['level'],
+        indicator_snapshot=res['indicators'],
+    ))
     db.commit()
+    db.refresh(ra)
 
     return schemas.RiskAssessmentResponse(
         score=res['score'],
@@ -287,8 +345,58 @@ def run_project_risk(project_id: int, db: Session = Depends(get_db), user: dict 
         indicators=[schemas.RiskIndicatorSchema(**i) for i in res['indicators']]
     )
 
+
+@router.get("/{project_id}/risk", response_model=schemas.RiskAssessmentResponse)
+def run_project_risk(project_id: int, db: Session = Depends(get_db), user: dict = Depends(RoleChecker(['Admin', 'Auditor', 'State', 'District']))):
+    assessment = db.query(models.RiskAssessment).filter(
+        models.RiskAssessment.project_id == project_id
+    ).order_by(
+        models.RiskAssessment.created_at.desc(),
+        models.RiskAssessment.id.desc(),
+    ).first()
+    if not assessment:
+        if not db.query(models.Project).filter(models.Project.id == project_id).first():
+            raise HTTPException(status_code=404, detail="Project not found")
+        return schemas.RiskAssessmentResponse(
+            level="LIMITED",
+            assessment_status="NOT_ASSESSABLE",
+            risk_reasons=[],
+            indicators=[],
+        )
+    indicators = db.query(models.RiskIndicator).filter(
+        models.RiskIndicator.risk_assessment_id == assessment.id
+    ).all()
+    return schemas.RiskAssessmentResponse(
+        score=assessment.score,
+        level=assessment.overall_risk_level,
+        assessment_status=assessment.assessment_status or "NOT_ASSESSABLE",
+        assessment_coverage=schemas.AssessmentCoverage(
+            assessable=assessment.assessable_indicator_count,
+            total=assessment.total_indicator_count,
+            percentage=assessment.assessment_coverage_pct,
+        ) if assessment.assessment_coverage_pct is not None else None,
+        assessable_indicator_count=assessment.assessable_indicator_count,
+        total_indicator_count=assessment.total_indicator_count,
+        risk_reasons=assessment.risk_reasons or [],
+        indicators=[schemas.RiskIndicatorSchema(
+            indicator=i.indicator,
+            status=i.status,
+            severity=i.severity,
+            score=i.score,
+            confidence=i.confidence,
+            explanation=i.explanation or "",
+            evidence=i.evidence or {},
+            data_provenance=i.data_provenance,
+        ) for i in indicators],
+    )
+
+
+@router.post("/{project_id}/risk", response_model=schemas.RiskAssessmentResponse)
+def create_project_risk_assessment(project_id: int, db: Session = Depends(get_db), user: dict = Depends(RoleChecker(['Admin', 'Auditor', 'State', 'District']))):
+    return _calculate_and_persist_risk(project_id, db)
+
 @router.get("/{project_id}/risk/history", response_model=schemas.RiskHistoryResponse)
-def get_risk_history(project_id: int, db: Session = Depends(get_db), current_user: dict = Depends(get_current_user)):
+def get_risk_history(project_id: int, limit: int = Query(100, ge=1, le=500), db: Session = Depends(get_db), current_user: dict = Depends(get_current_user)):
     p = db.query(models.Project).filter(models.Project.id == project_id).first()
     if not p:
         raise HTTPException(status_code=404, detail="Project not found")
@@ -296,7 +404,11 @@ def get_risk_history(project_id: int, db: Session = Depends(get_db), current_use
     # Order oldest to newest for trend analysis, but return newest to oldest
     assessments = db.query(models.RiskAssessment).filter(
         models.RiskAssessment.project_id == project_id
-    ).order_by(models.RiskAssessment.created_at.asc()).all()
+    ).order_by(
+        models.RiskAssessment.created_at.desc(),
+        models.RiskAssessment.id.desc(),
+    ).limit(limit).all()
+    assessments.reverse()
     
     if not assessments:
         return schemas.RiskHistoryResponse(
@@ -307,6 +419,14 @@ def get_risk_history(project_id: int, db: Session = Depends(get_db), current_use
             risk_trend_explanation="No historical data available.",
             score_change_absolute=None
         )
+
+    assessment_ids = [assessment.id for assessment in assessments]
+    indicator_rows = db.query(models.RiskIndicator).filter(
+        models.RiskIndicator.risk_assessment_id.in_(assessment_ids)
+    ).all()
+    indicators_by_assessment = {}
+    for indicator in indicator_rows:
+        indicators_by_assessment.setdefault(indicator.risk_assessment_id, []).append(indicator)
 
     # Convert to dictionaries for TrendAnalyzer
     assessments_data = []
@@ -325,7 +445,7 @@ def get_risk_history(project_id: int, db: Session = Depends(get_db), current_use
     # Build RiskHistoryAssessment objects
     history_assessments = []
     for a in reversed(assessments): # Newest first for response
-        inds = db.query(models.RiskIndicator).filter(models.RiskIndicator.risk_assessment_id == a.id).all()
+        inds = indicators_by_assessment.get(a.id, [])
         for i in inds:
             if i.indicator not in indicator_dict:
                 indicator_dict[i.indicator] = []
@@ -346,9 +466,9 @@ def get_risk_history(project_id: int, db: Session = Depends(get_db), current_use
             risk_level=a.overall_risk_level,
             assessment_status=a.assessment_status,
             assessment_coverage=schemas.AssessmentCoverage(
-                assessable=a.assessable_indicator_count or 0,
-                total=a.total_indicator_count or 0,
-                percentage=a.assessment_coverage_pct or 0.0
+                assessable=a.assessable_indicator_count,
+                total=a.total_indicator_count,
+                percentage=a.assessment_coverage_pct,
             ) if a.assessment_coverage_pct is not None else None,
             risk_reasons=a.risk_reasons or [],
             engine_version=a.engine_version
@@ -378,14 +498,17 @@ def get_risk_history(project_id: int, db: Session = Depends(get_db), current_use
     )
 
 @router.get("/{project_id}/compliance/history", response_model=schemas.ComplianceHistoryResponse)
-def get_compliance_history(project_id: int, db: Session = Depends(get_db), current_user: dict = Depends(get_current_user)):
+def get_compliance_history(project_id: int, limit: int = Query(100, ge=1, le=500), db: Session = Depends(get_db), current_user: dict = Depends(get_current_user)):
     p = db.query(models.Project).filter(models.Project.id == project_id).first()
     if not p:
         raise HTTPException(status_code=404, detail="Project not found")
 
     assessments = db.query(models.ComplianceAssessment).filter(
         models.ComplianceAssessment.project_id == project_id
-    ).order_by(models.ComplianceAssessment.assessed_at.desc()).all()
+    ).order_by(
+        models.ComplianceAssessment.assessed_at.desc(),
+        models.ComplianceAssessment.id.desc(),
+    ).limit(limit).all()
     
     if not assessments:
          return schemas.ComplianceHistoryResponse(

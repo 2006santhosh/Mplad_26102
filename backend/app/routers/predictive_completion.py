@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from ..database import get_db
 from .. import models, schemas
-from ..auth_utils import get_current_user
+from ..auth_utils import get_current_user, RoleChecker
 from ..risk_engine.predictive_completion import PredictiveCompletionRiskEngine
 
 router = APIRouter(prefix="/api/projects/{project_id}/predictive-completion", tags=["predictive-completion"])
@@ -24,7 +24,7 @@ def get_predictive_completion(project_id: int, db: Session = Depends(get_db), cu
             risk_level=None,
             risk_score=None,
             confidence=None,
-            coverage_pct=35.0,
+            coverage_pct=None,
             drivers=["No predictive assessment has been explicitly generated for this project yet."],
             evidence={},
             missing_data=["Predictive assessment never run"],
@@ -46,7 +46,7 @@ def get_predictive_completion(project_id: int, db: Session = Depends(get_db), cu
     )
 
 @router.post("/assess", response_model=schemas.PredictiveCompletionResponse)
-def run_predictive_completion(project_id: int, db: Session = Depends(get_db), current_user: dict = Depends(get_current_user)):
+def run_predictive_completion(project_id: int, db: Session = Depends(get_db), current_user: dict = Depends(RoleChecker(["Admin", "Auditor", "State", "District"]))):
     p = db.query(models.Project).filter(models.Project.id == project_id).first()
     if not p:
         raise HTTPException(status_code=404, detail="Project not found")

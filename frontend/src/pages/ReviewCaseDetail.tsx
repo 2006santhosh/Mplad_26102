@@ -1,8 +1,7 @@
 import { useEffect, useState } from 'react';
-import { useParams, Link, useNavigate } from 'react-router-dom';
+import { useParams, Link } from 'react-router-dom';
 import {
   getReviewCase, updateReviewCase, addCaseNote, addCaseAction,
-  getProjectReviewCases
 } from '../lib/api';
 import {
   ShieldAlert, AlertTriangle, CheckCircle, Clock, XCircle,
@@ -64,7 +63,6 @@ const NEXT_STATUSES: Record<string, string[]> = {
 
 export const ReviewCaseDetail = () => {
   const { id } = useParams();
-  const navigate = useNavigate();
   const [caseData, setCaseData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -376,6 +374,11 @@ export const ReviewCaseDetail = () => {
                     <AlertTriangle className="w-5 h-5 text-red-600" />
                     <span className="font-bold text-red-800 text-sm">HALT — Official Authorization Required</span>
                   </div>
+                  {showHaltConfirm && (
+                    <p className="text-xs text-red-700 mb-2 font-medium">
+                      Please confirm that the reviewer is authorized to order this official halt action.
+                    </p>
+                  )}
                   <p className="text-xs text-red-700 mb-3">
                     HALT is an official action by an authorized senior officer. AI did not trigger this.
                     Only an authorized official may record this action. This will be permanently audited.

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import { getReviewCases } from '../lib/api';
 import {
   Folder, AlertTriangle, CheckCircle, Clock, XCircle,

@@ -1,6 +1,9 @@
 import { useEffect, useState } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
-import { getProjectDetails, getDecisionSupport, getReviews, postReview, getProjectReviewCases, createReviewCase } from '../lib/api';
+import {
+  getProjectDetails, getDecisionSupport, getReviews, postReview, getProjectReviewCases, createReviewCase,
+  runRiskAssessment, assessCompliance, assessEarlyWarnings, assessPredictiveCompletionRisk
+} from '../lib/api';
 import { 
   ShieldCheck, AlertTriangle, AlertCircle, Clock, CheckCircle, 
   History, Info, MessageSquare, Server, Layers, FolderOpen, ExternalLink
@@ -21,6 +24,9 @@ export const ProjectIntelligence = () => {
   
   const [reviewForm, setReviewForm] = useState({ reviewed_by: 'Authorized Official', action: 'COMMENT', comment: '' });
   const [submittingReview, setSubmittingReview] = useState(false);
+  const [runningAssessment, setRunningAssessment] = useState<string | null>(null);
+  const [assessmentMessage, setAssessmentMessage] = useState<string | null>(null);
+  const [assessmentError, setAssessmentError] = useState<string | null>(null);
 
   useEffect(() => {
     if (id) {
@@ -79,6 +85,36 @@ export const ProjectIntelligence = () => {
     }
   };
 
+  const handleFreshAssessment = async (assessment: 'risk' | 'compliance' | 'early-warning' | 'completion') => {
+    if (!id || runningAssessment) return;
+
+    const assessmentLabels = {
+      risk: 'Risk Analysis',
+      compliance: 'Compliance Assessment',
+      'early-warning': 'Early Warning Assessment',
+      completion: 'Completion Risk',
+    };
+
+    setRunningAssessment(assessment);
+    setAssessmentMessage(null);
+    setAssessmentError(null);
+    try {
+      const projectId = Number(id);
+      if (assessment === 'risk') await runRiskAssessment(projectId);
+      if (assessment === 'compliance') await assessCompliance(projectId);
+      if (assessment === 'early-warning') await assessEarlyWarnings(projectId);
+      if (assessment === 'completion') await assessPredictiveCompletionRisk(projectId);
+
+      const refreshedDecisionSupport = await getDecisionSupport(projectId);
+      setDecisionSupport(refreshedDecisionSupport);
+      setAssessmentMessage(`${assessmentLabels[assessment]} refreshed from a new persisted analytical assessment.`);
+    } catch (err: any) {
+      setAssessmentError(err.response?.data?.detail || `Unable to run ${assessmentLabels[assessment]}.`);
+    } finally {
+      setRunningAssessment(null);
+    }
+  };
+
   if (loading) return <div className="p-8 flex items-center gap-2"><Clock className="w-5 h-5 animate-spin" /> Loading official records...</div>;
   if (!project) return <div className="p-8">Project not found.</div>;
 
@@ -93,6 +129,10 @@ export const ProjectIntelligence = () => {
 
   // Active cases = not RESOLVED or DISMISSED
   const activeCase = projectCases.find((c: any) => ['OPEN','UNDER_REVIEW','ACTION_REQUIRED'].includes(c.status));
+  const canRunAssessment = ['Admin', 'Auditor', 'State', 'District'].includes(localStorage.getItem('role') || '');
+  const reviewPrioritySignals = decisionSupport?.review_priority?.why_flagged || [];
+  const contributingSignals = decisionSupport?.review_priority?.contributing_signals || [];
+  const hasPriorityWithoutCriticalFlag = decisionSupport?.review_priority?.level === 'HIGH' && reviewPrioritySignals.length === 0 && contributingSignals.length > 0;
 
   return (
     <div className="p-8 max-w-7xl mx-auto space-y-8 font-sans">
@@ -125,6 +165,11 @@ export const ProjectIntelligence = () => {
 
       {decisionSupport && (
         <>
+          {(assessmentMessage || assessmentError) && (
+            <div className={`rounded-lg border px-4 py-3 text-sm ${assessmentError ? 'bg-red-50 border-red-200 text-red-700' : 'bg-emerald-50 border-emerald-200 text-emerald-700'}`}>
+              {assessmentError || assessmentMessage}
+            </div>
+          )}
           {/* Review Priority Summary */}
           <div className="bg-white border border-gray-200 rounded-xl shadow-xs overflow-hidden">
             <div className={`p-4 border-b flex items-center gap-3 ${
@@ -135,8 +180,13 @@ export const ProjectIntelligence = () => {
             }`}>
               {decisionSupport.review_priority.level === 'CRITICAL' ? <AlertTriangle className="w-6 h-6 text-red-600" /> : <AlertCircle className="w-6 h-6 text-gray-600" />}
               <div>
-                <h2 className="text-lg font-bold text-gray-900">Official Review Priority: <span className={getPriorityColor(decisionSupport.review_priority.level) + " px-2 py-0.5 rounded text-sm ml-2"}>{decisionSupport.review_priority.level}</span></h2>
-                <p className="text-sm text-gray-600">Based on {decisionSupport.review_priority.evidence_coverage.toFixed(1)}% evidence coverage.</p>
+                <h2 className="text-lg font-bold text-gray-900">Analytical Review Priority: <span className={getPriorityColor(decisionSupport.review_priority.level) + " px-2 py-0.5 rounded text-sm ml-2"}>{decisionSupport.review_priority.level}</span></h2>
+                <p className="text-sm text-gray-600">
+                  {decisionSupport.review_priority.evidence_coverage != null
+                    ? `Based on ${Number(decisionSupport.review_priority.evidence_coverage).toFixed(1)}% evidence coverage.`
+                    : 'Evidence coverage is unavailable for this project. Review priority remains analytical only.'}
+                </p>
+                  <p className="text-xs text-indigo-700 mt-1">An aggregate analytical recommendation that may differ from any individual risk, compliance, warning, or completion assessment. It is not an official government determination.</p>
               </div>
             </div>
             
@@ -144,9 +194,9 @@ export const ProjectIntelligence = () => {
               {/* Why Flagged */}
               <div>
                 <h3 className="font-bold text-gray-900 mb-3 flex items-center gap-2"><Info className="w-4 h-4 text-indigo-600"/> Why Was This Flagged?</h3>
-                {decisionSupport.review_priority.why_flagged.length > 0 ? (
+                {reviewPrioritySignals.length > 0 ? (
                   <ul className="space-y-3">
-                    {decisionSupport.review_priority.why_flagged.map((flag: any, i: number) => (
+                    {reviewPrioritySignals.map((flag: any, i: number) => (
                       <li key={i} className="bg-gray-50 p-3 rounded-lg border border-gray-100 text-sm">
                         <div className="flex items-center justify-between mb-1">
                           <span className="font-bold text-gray-800">{flag.signal_type}</span>
@@ -160,8 +210,18 @@ export const ProjectIntelligence = () => {
                       </li>
                     ))}
                   </ul>
+                ) : contributingSignals.length > 0 ? (
+                  <div className="bg-gray-50 p-4 rounded border border-gray-100 text-sm">
+                    <p className="font-semibold text-gray-800 mb-2">Contributing analytical signals</p>
+                    <ul className="list-disc list-inside space-y-1 text-gray-600">
+                      {contributingSignals.map((signal: string, i: number) => <li key={i}>{signal}</li>)}
+                    </ul>
+                    {hasPriorityWithoutCriticalFlag && (
+                      <p className="text-xs text-indigo-700 mt-3">Review Priority is an aggregate analytical recommendation and may differ from any individual assessment.</p>
+                    )}
+                  </div>
                 ) : (
-                  <p className="text-sm text-gray-500 bg-gray-50 p-4 rounded text-center">No critical flags detected.</p>
+                  <p className="text-sm text-gray-500 bg-gray-50 p-4 rounded text-center">No contributing analytical signals are currently available.</p>
                 )}
               </div>
               
@@ -219,12 +279,95 @@ export const ProjectIntelligence = () => {
                 ))}
              </div>
           </div>
+
+          {/* Canonical analytical results, grouped for review without duplicating engine logic. */}
+          <div className="bg-white border border-indigo-200 rounded-xl shadow-xs overflow-hidden">
+            <div className="p-4 border-b bg-indigo-50/50">
+              <h2 className="text-lg font-bold text-gray-900">Analytical Evidence</h2>
+              <p className="text-xs text-gray-600 mt-1">Existing decision-support results for official review. These are analytical outputs, not official government determinations.</p>
+            </div>
+            <div className="p-6 grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="p-4 rounded-lg border border-gray-200 bg-gray-50/60">
+                <div className="flex items-center justify-between gap-3">
+                  <h3 className="font-bold text-gray-900">Risk Analysis</h3>
+                  <ProvenanceBadge type={decisionSupport.provenance?.risk_score || 'AI ASSESSMENT'} />
+                </div>
+                <button
+                  type="button"
+                  onClick={() => handleFreshAssessment('risk')}
+                  disabled={!canRunAssessment || runningAssessment !== null}
+                  className="mt-3 w-full rounded-md border border-indigo-200 bg-indigo-50 px-3 py-2 text-xs font-semibold text-indigo-700 hover:bg-indigo-100 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {runningAssessment === 'risk' ? 'Running Risk Analysis...' : 'Run Fresh Risk Analysis'}
+                </button>
+                <p className="text-sm text-gray-700 mt-3">Level: <strong>{decisionSupport.overall_risk?.level || 'UNAVAILABLE'}</strong></p>
+                <p className="text-sm text-gray-700">Score: <strong>{decisionSupport.overall_risk?.score ?? 'UNAVAILABLE'}</strong></p>
+                <p className="text-xs text-gray-500 mt-2">Coverage: {decisionSupport.overall_risk?.coverage != null ? `${decisionSupport.overall_risk.coverage}%` : 'UNAVAILABLE'}</p>
+              </div>
+
+              <div className="p-4 rounded-lg border border-gray-200 bg-gray-50/60">
+                <div className="flex items-center justify-between gap-3">
+                  <h3 className="font-bold text-gray-900">Compliance</h3>
+                  <ProvenanceBadge type="AI ASSESSMENT" />
+                </div>
+                <button
+                  type="button"
+                  onClick={() => handleFreshAssessment('compliance')}
+                  disabled={!canRunAssessment || runningAssessment !== null}
+                  className="mt-3 w-full rounded-md border border-indigo-200 bg-indigo-50 px-3 py-2 text-xs font-semibold text-indigo-700 hover:bg-indigo-100 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {runningAssessment === 'compliance' ? 'Running Compliance Assessment...' : 'Run Compliance Assessment'}
+                </button>
+                <p className="text-sm text-gray-700 mt-3">Status: <strong>{decisionSupport.compliance?.status || 'UNAVAILABLE'}</strong></p>
+                <p className="text-xs text-gray-500 mt-2">Coverage: {decisionSupport.compliance?.coverage != null ? `${decisionSupport.compliance.coverage}%` : 'UNAVAILABLE'}</p>
+                <p className="text-xs text-gray-500">Checks: {decisionSupport.compliance ? `${decisionSupport.compliance.pass_count ?? 0} pass, ${decisionSupport.compliance.review_count ?? 0} review, ${decisionSupport.compliance.fail_count ?? 0} fail` : 'UNAVAILABLE'}</p>
+              </div>
+
+              <div className="p-4 rounded-lg border border-gray-200 bg-gray-50/60">
+                <div className="flex items-center justify-between gap-3">
+                  <h3 className="font-bold text-gray-900">Early Warnings</h3>
+                  <ProvenanceBadge type={decisionSupport.provenance?.early_warnings || 'AI ASSESSMENT'} />
+                </div>
+                <button
+                  type="button"
+                  onClick={() => handleFreshAssessment('early-warning')}
+                  disabled={!canRunAssessment || runningAssessment !== null}
+                  className="mt-3 w-full rounded-md border border-indigo-200 bg-indigo-50 px-3 py-2 text-xs font-semibold text-indigo-700 hover:bg-indigo-100 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {runningAssessment === 'early-warning' ? 'Running Early Warning Assessment...' : 'Run Early Warning Assessment'}
+                </button>
+                <p className="text-sm text-gray-700 mt-3">Open conditions: <strong>{decisionSupport.early_warnings?.length ?? 'UNAVAILABLE'}</strong></p>
+                <p className="text-xs text-gray-500 mt-2">Triggered warning conditions are separate from Review Priority and AI Risk Signals.</p>
+              </div>
+
+              <div className="p-4 rounded-lg border border-gray-200 bg-gray-50/60">
+                <div className="flex items-center justify-between gap-3">
+                  <h3 className="font-bold text-gray-900">Predictive Completion Risk</h3>
+                  <ProvenanceBadge type={decisionSupport.provenance?.completion_risk || 'AI ASSESSMENT'} />
+                </div>
+                <button
+                  type="button"
+                  onClick={() => handleFreshAssessment('completion')}
+                  disabled={!canRunAssessment || runningAssessment !== null}
+                  className="mt-3 w-full rounded-md border border-indigo-200 bg-indigo-50 px-3 py-2 text-xs font-semibold text-indigo-700 hover:bg-indigo-100 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {runningAssessment === 'completion' ? 'Running Completion Risk...' : 'Run Fresh Completion Risk'}
+                </button>
+                <p className="text-sm text-gray-700 mt-3">Level: <strong>{decisionSupport.completion_risk?.level || 'UNAVAILABLE'}</strong></p>
+                <p className="text-sm text-gray-700">Score: <strong>{decisionSupport.completion_risk?.score ?? 'UNAVAILABLE'}</strong></p>
+                <p className="text-xs text-gray-500 mt-2">Confidence: {decisionSupport.completion_risk?.confidence || 'UNAVAILABLE'}</p>
+              </div>
+            </div>
+          </div>
           
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
               {/* Early Warning Center */}
               <div className="bg-white border border-gray-200 rounded-xl shadow-xs overflow-hidden flex flex-col">
                  <div className="p-4 border-b bg-gray-50/50 flex justify-between items-center">
-                   <h2 className="text-lg font-bold text-gray-900 flex items-center gap-2"><AlertTriangle className="w-5 h-5 text-amber-600"/> Open Review Center</h2>
+                   <div>
+                     <h2 className="text-lg font-bold text-gray-900 flex items-center gap-2"><AlertTriangle className="w-5 h-5 text-amber-600"/> Early Warnings</h2>
+                     <p className="text-xs text-gray-500 mt-1">Triggered warning conditions from the analytical warning engine.</p>
+                   </div>
                  </div>
                  <div className="p-6 flex-1">
                    {decisionSupport.early_warnings.length > 0 ? (
@@ -244,6 +387,7 @@ export const ProjectIntelligence = () => {
                      <div className="h-full flex flex-col items-center justify-center text-gray-400 p-8 text-center">
                         <CheckCircle className="w-12 h-12 mb-3 opacity-50" />
                         <p>No open early warnings.</p>
+                        <p className="text-xs mt-1">Review Priority and AI Risk Signals may still exist independently.</p>
                      </div>
                    )}
                  </div>

@@ -10,7 +10,9 @@ import {
   Layers, 
   ArrowRight,
   Info,
-  Clock
+  Clock,
+  ChevronDown,
+  ChevronUp
 } from 'lucide-react';
 
 export const Dashboard = () => {
@@ -18,6 +20,7 @@ export const Dashboard = () => {
   const [clusters, setClusters] = useState<any>(null);
   const [stats, setStats] = useState<any>(null);
   const [loading, setLoading] = useState(true);
+  const [showRiskBreakdown, setShowRiskBreakdown] = useState(false);
 
   useEffect(() => {
     setLoading(true);
@@ -220,10 +223,41 @@ export const Dashboard = () => {
             </div>
 
             <div className="space-y-3 text-sm">
+              <div className="flex flex-col border-b border-gray-100">
+                <div 
+                  className="flex justify-between items-center pb-2 cursor-pointer group"
+                  onClick={() => setShowRiskBreakdown(!showRiskBreakdown)}
+                >
+                  <span className="text-gray-600 group-hover:text-gray-900 flex items-center gap-1 transition-colors">
+                    Projects with Elevated AI Risk
+                    {showRiskBreakdown ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+                  </span>
+                  <span className="font-bold text-orange-600 font-mono">
+                    {stats ? stats.ai_risk_projects : 'Loading...'}
+                  </span>
+                </div>
+                {showRiskBreakdown && stats?.ai_risk_signal_breakdown && (
+                  <div className="pl-2 pb-3 space-y-1.5 animate-in slide-in-from-top-1 duration-200">
+                    <p className="text-[10px] uppercase font-bold text-gray-400 mb-1.5 mt-1">AI Risk Signal Breakdown</p>
+                    <p className="text-[10px] text-gray-500 mb-2">
+                      {stats.ai_risk_signal_total ?? 0} underlying analytical indicators across elevated-risk projects. These are not official findings.
+                    </p>
+                    {stats.ai_risk_signal_breakdown.map((sig: any, i: number) => (
+                      <div key={i} className="flex justify-between items-center text-[11px]">
+                        <span className="text-gray-500 truncate pr-2" title={sig.name}>{sig.name}</span>
+                        <span className="font-mono text-gray-400">{sig.count}</span>
+                      </div>
+                    ))}
+                    {stats.ai_risk_signal_breakdown.length === 0 && (
+                      <div className="text-[11px] text-gray-400 italic">No active signals</div>
+                    )}
+                  </div>
+                )}
+              </div>
               <div className="flex justify-between items-center pb-2 border-b border-gray-100">
-                <span className="text-gray-600">AI Risk Signals (Med/High/Crit)</span>
-                <span className="font-bold text-orange-600 font-mono">
-                  {stats ? stats.ai_risk_projects : 'Loading...'}
+                <span className="text-gray-600">AI Risk Signals (indicators)</span>
+                <span className="font-bold text-indigo-600 font-mono">
+                  {stats ? (stats.ai_risk_signal_total ?? 0) : 'Loading...'}
                 </span>
               </div>
               <div className="flex justify-between items-center pb-2 border-b border-gray-100">

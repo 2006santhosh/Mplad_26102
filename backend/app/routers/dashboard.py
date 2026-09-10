@@ -4,6 +4,7 @@ from sqlalchemy import func
 from ..database import get_db
 from .. import models, schemas
 from ..auth_utils import get_current_user
+from ..services.review_priority import calculate_review_priority
 from collections import defaultdict
 
 router = APIRouter(prefix="/api/dashboard", tags=["dashboard"])
@@ -23,49 +24,102 @@ def get_dashboard_stats(db: Session = Depends(get_db), current_user: dict = Depe
 
     # Financials
     total_sanctioned = 0.0
-    total_expenditure = 0.0
-
     for p in projects:
         s_amt = float(p.sanctioned_amount) if p.sanctioned_amount is not None and p.sanctioned_amount > 0 else 0.0
         total_sanctioned += s_amt
 
-        exp_records = [float(f.expenditure) for f in p.financials if f.expenditure is not None and f.expenditure >= 0]
-        if exp_records:
-            total_expenditure += max(exp_records)
+    project_ids = [p.id for p in projects]
 
-    utilization_pct = (total_expenditure / total_sanctioned * 100) if total_sanctioned > 0 else None
+    # --- N+1 Bulk Maps ---
+    # 1. Financials Map
+    fin_rows = db.query(models.ProjectFinancials.project_id, models.ProjectFinancials.expenditure).filter(
+        models.ProjectFinancials.project_id.in_(project_ids)
+    ).all()
+    fin_map = defaultdict(list)
+    for row in fin_rows:
+        if row.expenditure is not None and row.expenditure >= 0:
+            fin_map[row.project_id].append(float(row.expenditure))
 
-    # Portfolio Progress
-    progress_sum = 0.0
-    progress_count = 0
-    for p in projects:
-        prog_records = [pr.percentage for pr in p.progress if pr.percentage is not None and pr.percentage >= 0]
-        if prog_records:
-            progress_sum += max(prog_records)
-            progress_count += 1
+    # 2. Progress Map
+    prog_rows = db.query(models.ProjectProgress.project_id, models.ProjectProgress.percentage).filter(
+        models.ProjectProgress.project_id.in_(project_ids)
+    ).all()
+    prog_map = defaultdict(list)
+    for row in prog_rows:
+        if row.percentage is not None and row.percentage >= 0:
+            prog_map[row.project_id].append(float(row.percentage))
 
-    average_progress = (progress_sum / progress_count) if progress_count > 0 else None
+    # 3. Latest Risk Assessment Map
+    risk_assessments = db.query(models.RiskAssessment).filter(
+        models.RiskAssessment.project_id.in_(project_ids)
+    ).order_by(
+        models.RiskAssessment.created_at.desc(),
+        models.RiskAssessment.id.desc(),
+    ).all()
+    
+    latest_assessments = {}
+    for ra in risk_assessments:
+        if ra.project_id not in latest_assessments:
+            latest_assessments[ra.project_id] = ra
+
+    latest_assessment_ids = [ra.id for ra in latest_assessments.values()]
 
     # Risk Distribution & AI Risk Projects
     risk_distribution = {"LOW": 0, "MEDIUM": 0, "HIGH": 0, "CRITICAL": 0, "LIMITED": 0}
     ai_risk_projects = set()
+    
+    for pid, ra in latest_assessments.items():
+        level = ra.overall_risk_level.upper() if ra.overall_risk_level else "LOW"
+        if level in risk_distribution:
+            risk_distribution[level] += 1
+        if level in ["MEDIUM", "HIGH", "CRITICAL"]:
+            ai_risk_projects.add(pid)
 
-    for p in projects:
-        if p.risk_assessments:
-            latest_assessment = sorted(p.risk_assessments, key=lambda x: x.created_at, reverse=True)[0]
-            level = latest_assessment.overall_risk_level.upper() if latest_assessment.overall_risk_level else "LOW"
-            if level in risk_distribution:
-                risk_distribution[level] += 1
-            if level in ["MEDIUM", "HIGH", "CRITICAL"]:
-                ai_risk_projects.add(p.id)
+    # 4. Actual Risk Indicators for Breakdown
+    active_indicators = db.query(models.RiskIndicator.indicator, models.RiskIndicator.severity).filter(
+        models.RiskIndicator.risk_assessment_id.in_(latest_assessment_ids),
+        models.RiskIndicator.severity.in_(["MEDIUM", "HIGH", "CRITICAL"])
+    ).all()
+    
+    signal_breakdown = defaultdict(int)
+    for ind in active_indicators:
+        signal_breakdown[ind.indicator] += 1
+        
+    signal_breakdown_list = [{"name": k, "count": v} for k, v in sorted(signal_breakdown.items(), key=lambda x: x[1], reverse=True)]
+    ai_risk_signal_total = sum(item["count"] for item in signal_breakdown_list)
 
-    # Human Review Flags
+    # 5. Human Review Flags Map
+    review_rows = db.query(models.ReviewLog.project_id, models.ReviewLog.action, models.ReviewLog.created_at).filter(
+        models.ReviewLog.project_id.in_(project_ids)
+    ).all()
+    latest_reviews = {}
+    for row in review_rows:
+        pid, action, cat = row.project_id, row.action, row.created_at
+        if pid not in latest_reviews or cat > latest_reviews[pid][1]:
+            latest_reviews[pid] = (action, cat)
+
     human_flags = set()
-    for p in projects:
-        if p.review_logs:
-            latest_review = sorted(p.review_logs, key=lambda x: x.created_at, reverse=True)[0]
-            if latest_review.action == "FLAG":
-                human_flags.add(p.id)
+    for pid, (action, _) in latest_reviews.items():
+        if action == "FLAG":
+            human_flags.add(pid)
+
+    # Calculate Utilization
+    total_expenditure = 0.0
+    for pid in project_ids:
+        if pid in fin_map:
+            total_expenditure += max(fin_map[pid])
+
+    utilization_pct = (total_expenditure / total_sanctioned * 100) if total_sanctioned > 0 else None
+
+    # Calculate Progress
+    progress_sum = 0.0
+    progress_count = 0
+    for pid in project_ids:
+        if pid in prog_map:
+            progress_sum += max(prog_map[pid])
+            progress_count += 1
+
+    average_progress = (progress_sum / progress_count) if progress_count > 0 else None
 
     # Delayed Projects
     delayed_projects = set(p.id for p in projects if p.status == "DELAYED")
@@ -100,7 +154,10 @@ def get_dashboard_stats(db: Session = Depends(get_db), current_user: dict = Depe
     comp_rows = db.query(
         models.ComplianceAssessment.project_id,
         models.ComplianceAssessment.overall_status
-    ).order_by(models.ComplianceAssessment.assessed_at.desc()).all()
+    ).order_by(
+        models.ComplianceAssessment.assessed_at.desc(),
+        models.ComplianceAssessment.id.desc(),
+    ).all()
     
     comp_map = {}
     for row in comp_rows:
@@ -125,7 +182,9 @@ def get_dashboard_stats(db: Session = Depends(get_db), current_user: dict = Depe
     gps_coverage = (valid_gps_count / total_projects * 100) if total_projects > 0 else 0.0
 
     # Early Warnings
-    early_warnings = db.query(models.EarlyWarning).filter(models.EarlyWarning.status == "OPEN").all()
+    early_warnings = db.query(models.EarlyWarning).filter(
+        models.EarlyWarning.status.in_(["OPEN", "ACKNOWLEDGED", "UNDER_REVIEW"])
+    ).order_by(models.EarlyWarning.detected_at.desc(), models.EarlyWarning.id.desc()).all()
     ew_critical = ew_high = ew_medium = ew_low = 0
     ew_categories = {}
 
@@ -161,7 +220,10 @@ def get_dashboard_stats(db: Session = Depends(get_db), current_user: dict = Depe
         models.PredictiveCompletionAssessment.project_id,
         models.PredictiveCompletionAssessment.risk_level,
         models.PredictiveCompletionAssessment.status
-    ).order_by(models.PredictiveCompletionAssessment.created_at.desc()).all()
+    ).order_by(
+        models.PredictiveCompletionAssessment.created_at.desc(),
+        models.PredictiveCompletionAssessment.id.desc(),
+    ).all()
     
     pred_map = {}
     for row in pred_rows:
@@ -177,8 +239,13 @@ def get_dashboard_stats(db: Session = Depends(get_db), current_user: dict = Depe
     insufficient_ev = 0
     
     # Risk map for priority
-    risk_rows = db.query(models.RiskAssessment.project_id, models.RiskAssessment.overall_risk_level, models.RiskAssessment.assessment_coverage_pct).all()
-    risk_map = {row[0]: (row[1], row[2]) for row in risk_rows}
+    risk_rows = db.query(models.RiskAssessment.project_id, models.RiskAssessment.overall_risk_level, models.RiskAssessment.assessment_coverage_pct).order_by(
+        models.RiskAssessment.created_at.desc(), models.RiskAssessment.id.desc()
+    ).all()
+    risk_map = {}
+    for row in risk_rows:
+        if row[0] not in risk_map:
+            risk_map[row[0]] = (row[1], row[2])
     
     # EW map for priority
     ew_map = {}
@@ -198,31 +265,25 @@ def get_dashboard_stats(db: Session = Depends(get_db), current_user: dict = Depe
             elif latest["level"] == "MEDIUM":
                 pred_med += 1
                 
-        # Calculate Review Priority
-        priority = "LOW"
-        risk_lvl, risk_cov = risk_map.get(p.id, (None, 0.0))
+        # Calculate Review Priority through the canonical service.
+        risk_lvl, risk_cov = risk_map.get(p.id, (None, None))
         comp_status = comp_map.get(p.id, "NOT_ASSESSABLE")
         ew_count = ew_map.get(p.id, 0)
 
-        if risk_lvl in ["HIGH", "CRITICAL"]:
-            priority = "CRITICAL" if risk_lvl == "CRITICAL" else "HIGH"
-        if comp_status in ["FAIL", "REVIEW"] and priority in ["LOW", "MEDIUM"]:
-            priority = "HIGH"
-        if ew_count > 0 and priority in ["LOW", "MEDIUM"]:
-            priority = "HIGH"
-        if pred_lvl in ["HIGH", "CRITICAL"] and priority in ["LOW", "MEDIUM"]:
-            priority = "HIGH"
-        if priority == "LOW" and risk_lvl == "MEDIUM":
-            priority = "MEDIUM"
-            
-        if risk_cov and risk_cov < 30.0:
+        priority = calculate_review_priority(
+            overall_risk={"level": risk_lvl, "score": None, "coverage": risk_cov},
+            risk_trend={"trend": "STABLE", "explanation": "Risk levels have remained stable."},
+            compliance={"status": comp_status},
+            open_warnings=[{"level": "LOW"}] * ew_count,
+            completion_risk={"level": pred_lvl, "confidence": None},
+        )
+        if risk_cov is not None and risk_cov < 30.0:
             insufficient_ev += 1
-            if priority == "LOW":
-                priority = "MEDIUM"
+        priority_level = priority["level"]
 
-        if priority == "CRITICAL": pri_crit += 1
-        elif priority == "HIGH": pri_high += 1
-        elif priority == "MEDIUM": pri_med += 1
+        if priority_level == "CRITICAL": pri_crit += 1
+        elif priority_level == "HIGH": pri_high += 1
+        elif priority_level == "MEDIUM": pri_med += 1
         else: pri_low += 1
 
     return schemas.DashboardStatsResponse(
@@ -235,6 +296,8 @@ def get_dashboard_stats(db: Session = Depends(get_db), current_user: dict = Depe
         projects_with_progress=progress_count,
         average_progress=average_progress,
         ai_risk_projects=len(ai_risk_projects),
+        ai_risk_signal_total=ai_risk_signal_total,
+        ai_risk_signal_breakdown=signal_breakdown_list,
         human_review_flags=len(human_flags),
         delayed_projects=len(delayed_projects),
         projects_requiring_attention=len(attention_projects),

@@ -91,7 +91,7 @@ def setup_db():
 
 def test_compliance_valid_project():
     """Project 1 has all required fields → mostly PASS, some NOT_ASSESSABLE."""
-    response = client.get("/api/projects/1/compliance/")
+    response = client.post("/api/projects/1/compliance/assess")
     assert response.status_code == 200
     data = response.json()
     assert "checks" in data
@@ -126,7 +126,7 @@ def test_compliance_valid_project():
 
 def test_compliance_expenditure_exceeds():
     """Project 2 has expenditure > sanctioned → financial discipline REVIEW."""
-    response = client.get("/api/projects/2/compliance/")
+    response = client.post("/api/projects/2/compliance/assess")
     assert response.status_code == 200
     data = response.json()
     fin_check = next(c for c in data["checks"] if c["check_id"] == "financial_discipline")
@@ -137,7 +137,7 @@ def test_compliance_expenditure_exceeds():
 
 def test_compliance_completed_project():
     """Project 3 is completed → stage duration passes, coverage measured."""
-    response = client.get("/api/projects/3/compliance/")
+    response = client.post("/api/projects/3/compliance/assess")
     assert response.status_code == 200
     data = response.json()
 
@@ -148,7 +148,7 @@ def test_compliance_completed_project():
 
 def test_compliance_missing_financial():
     """Project 4 has no financial data → financial discipline NOT_ASSESSABLE."""
-    response = client.get("/api/projects/4/compliance/")
+    response = client.post("/api/projects/4/compliance/assess")
     assert response.status_code == 200
     data = response.json()
     fin_check = next(c for c in data["checks"] if c["check_id"] == "financial_discipline")
@@ -158,7 +158,7 @@ def test_compliance_missing_financial():
 
 def test_compliance_completed_missing_progress():
     """Project 5 is completed without progress → Analytical Progress Proxy always NOT_ASSESSABLE."""
-    response = client.get("/api/projects/5/compliance/")
+    response = client.post("/api/projects/5/compliance/assess")
     assert response.status_code == 200
     data = response.json()
     prog_check = next(c for c in data["checks"] if c["check_id"] == "physical_progress_verification")
@@ -168,7 +168,7 @@ def test_compliance_completed_missing_progress():
 
 def test_compliance_invalid_values():
     """Project 6 has negative sanction and negative expenditure."""
-    response = client.get("/api/projects/6/compliance/")
+    response = client.post("/api/projects/6/compliance/assess")
     assert response.status_code == 200
     data = response.json()
     # Negative sanctioned amount → FAIL (deterministic data-integrity)
@@ -188,7 +188,7 @@ def test_compliance_nonexistent_project():
 
 def test_compliance_coverage_percentage():
     """Verify coverage percentage is correctly calculated."""
-    response = client.get("/api/projects/1/compliance/")
+    response = client.post("/api/projects/1/compliance/assess")
     assert response.status_code == 200
     data = response.json()
     assert 0 <= data["coverage_percentage"] <= 100

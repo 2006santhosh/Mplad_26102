@@ -142,17 +142,16 @@ def test_map_api(auth_client, db_session):
     assert response.status_code == 200
     data = response.json()
     
-    # There are 6 projects total, but only 4 have VALID coordinates (p1, p4, p5, p6)
-    # The API returns ALL valid coordinates from all projects (including synthetic if queried normally, 
-    # but wait! get_map_data currently queries all projects regardless of source_type).
+    # Official spatial intelligence excludes the synthetic project p6.
+    # The valid official coordinates are p1, p4, and p5.
     
     valid_ids = [p["project_id"] for p in data["projects"]]
-    assert len(data["projects"]) == 4 
+    assert len(data["projects"]) == 3
     assert data["unavailable_gps_count"] == 2 # p2 (invalid), p3 (missing)
-    assert data["valid_gps_count"] == 4
+    assert data["valid_gps_count"] == 3
     
-    # Check coverage (4 / 6 * 100)
-    assert abs(data["gps_coverage_percentage"] - 66.66) < 0.1
+    # Check official coverage (3 / 5 * 100)
+    assert abs(data["gps_coverage_percentage"] - 60.0) < 0.1
 
 def test_early_warning_geo_rules(auth_client, db_session):
     p1, p2, p3, p4, p5, p6 = seed_geo_data(db_session)

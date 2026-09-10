@@ -24,10 +24,10 @@ class EarlyWarningEngine:
         warnings_to_issue = []
 
         # Gather data
-        risk_history = sorted(p.risk_history, key=lambda x: x.recorded_at)
-        comp_history = sorted(p.compliance_assessments, key=lambda x: x.assessed_at)
-        prog = sorted(p.progress, key=lambda x: x.reported_at)
-        fin = sorted(p.financials, key=lambda x: x.updated_at)
+        risk_history = sorted(p.risk_history, key=lambda x: (x.recorded_at, x.id))
+        comp_history = sorted(p.compliance_assessments, key=lambda x: (x.assessed_at, x.id))
+        prog = sorted(p.progress, key=lambda x: (x.reported_at, x.id))
+        fin = sorted(p.financials, key=lambda x: (x.updated_at, x.id))
 
         def add_warning(w_type, level, title, explanation, data_str, evidence, coverage):
             sig = self.generate_signature(project_id, w_type, data_str)

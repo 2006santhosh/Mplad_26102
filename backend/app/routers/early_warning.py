@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from ..database import get_db
 from .. import models, schemas
@@ -35,6 +35,7 @@ def _serialize_warnings(warnings):
 @router.get("/{project_id}/early-warning", response_model=schemas.EarlyWarningResponse)
 def get_project_warnings(
     project_id: int,
+    limit: int = Query(100, ge=1, le=500),
     db: Session = Depends(get_db),
     current_user: dict = Depends(get_current_user),
 ):
@@ -52,6 +53,7 @@ def get_project_warnings(
         db.query(models.EarlyWarning)
         .filter(models.EarlyWarning.project_id == project_id)
         .order_by(models.EarlyWarning.detected_at.desc())
+        .limit(limit)
         .all()
     )
     return schemas.EarlyWarningResponse(

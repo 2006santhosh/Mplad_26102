@@ -188,7 +188,7 @@ export const ProjectRegister = () => {
                 <th className="px-5 py-3.5">Sanctioned Amount</th>
                 <th className="px-5 py-3.5">Official Work Stage</th>
                 <th className="px-5 py-3.5">Analytical Proxy %</th>
-                <th className="px-5 py-3.5">Review Priority</th>
+                <th className="px-5 py-3.5">Analytical Review Priority</th>
                 <th className="px-5 py-3.5">Completion Risk</th>
                 <th className="px-5 py-3.5">Early Warnings</th>
                 <th className="px-5 py-3.5 text-right">Action</th>
@@ -240,45 +240,59 @@ export const ProjectRegister = () => {
                       <td className="px-5 py-4 whitespace-nowrap">
                         <div className="flex flex-col items-start gap-1">
                           <span className="font-semibold text-gray-900 font-mono">
-                            {p.sanctioned_amount
+                            {p.sanctioned_amount != null
                               ? `₹${Number(p.sanctioned_amount).toLocaleString('en-IN')}`
-                              : '₹0'}
+                              : 'UNAVAILABLE'}
                           </span>
-                          <ProvenanceBadge type={p.provenance?.sanctioned_amount || 'UNAVAILABLE'} />
+                          <ProvenanceBadge
+                            prefix="Sanction Amount:"
+                            type={p.provenance?.sanctioned_amount || 'UNAVAILABLE'}
+                            title={p.sanctioned_amount != null ? 'Official sanctioned amount from the source dataset.' : 'Required source field is absent in the official dataset. No value is inferred.'}
+                          />
                         </div>
                       </td>
 
                       <td className="px-5 py-4 whitespace-nowrap">
                         <div className="flex flex-col items-start gap-1">
                           <span className="inline-flex items-center px-2.5 py-1 rounded-md text-xs font-medium bg-slate-100 text-slate-800 border border-slate-200">
-                            {p.work_stage || p.status || 'Registered'}
+                            {p.work_stage || 'UNAVAILABLE'}
                           </span>
-                          <ProvenanceBadge type={p.provenance?.work_stage || 'UNAVAILABLE'} />
+                          <ProvenanceBadge
+                            prefix="Work Stage:"
+                            type={p.provenance?.work_stage || 'UNAVAILABLE'}
+                            title={p.work_stage ? 'Official work-stage value from the source dataset.' : 'Required work-stage field is absent in the official dataset. No value is inferred.'}
+                          />
                         </div>
                       </td>
 
                       <td className="px-5 py-4 whitespace-nowrap">
                         <div className="flex flex-col items-start gap-1">
                           <div className="flex items-center gap-2">
-                            <div className="w-16 bg-gray-200 rounded-full h-2 overflow-hidden">
-                              <div
-                                className={`h-2 rounded-full ${
-                                  (p.progress_pct ?? 0) === 100
-                                    ? 'bg-emerald-500'
-                                    : (p.progress_pct ?? 0) > 40
-                                    ? 'bg-blue-500'
-                                    : 'bg-amber-500'
-                                }`}
-                                style={{ width: `${Math.min(100, Math.max(0, p.progress_pct ?? 0))}%` }}
-                              />
-                            </div>
+                            {p.progress_pct != null && (
+                              <div className="w-16 bg-gray-200 rounded-full h-2 overflow-hidden">
+                                <div
+                                  className={`h-2 rounded-full ${
+                                    p.progress_pct === 100
+                                      ? 'bg-emerald-500'
+                                      : p.progress_pct > 40
+                                      ? 'bg-blue-500'
+                                      : 'bg-amber-500'
+                                  }`}
+                                  style={{ width: `${Math.min(100, Math.max(0, p.progress_pct))}%` }}
+                                />
+                              </div>
+                            )}
                             <span className="text-xs font-semibold text-gray-700">
                               {p.progress_pct !== null && p.progress_pct !== undefined
                                 ? `${p.progress_pct}%`
-                                : 'Not available in official dataset'}
+                                : 'UNAVAILABLE'}
                             </span>
                           </div>
-                          <ProvenanceBadge type={p.provenance?.physical_progress || 'UNAVAILABLE'} />
+                          <ProvenanceBadge
+                            prefix="Analytical Progress Proxy:"
+                            type={p.provenance?.physical_progress || 'UNAVAILABLE'}
+                            title={p.progress_pct != null ? 'Derived analytical progress proxy based on official work-stage data.' : 'The required progress field is not present in the official dataset. No proxy is inferred.'}
+                          />
                         </div>
                       </td>
 
@@ -310,8 +324,9 @@ export const ProjectRegister = () => {
                               ? 'bg-red-100 text-red-800 border-red-200' 
                               : 'bg-slate-100 text-slate-600 border-slate-200'
                           }`}>
-                            {p.early_warning_count || 0} Alerts
+                            {p.early_warning_count ?? 'UNAVAILABLE'} Early Warnings
                           </span>
+                          <span className="text-[10px] text-gray-500">Triggered warning conditions</span>
                         </div>
                       </td>
 

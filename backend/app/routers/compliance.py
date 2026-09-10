@@ -23,10 +23,10 @@ def _build_project_context(p: models.Project, db: Session) -> dict:
     """Build a flat project dictionary for the compliance engine."""
     prog = db.query(models.ProjectProgress).filter(
         models.ProjectProgress.project_id == p.id
-    ).order_by(models.ProjectProgress.reported_at.desc()).first()
+    ).order_by(models.ProjectProgress.reported_at.desc(), models.ProjectProgress.id.desc()).first()
     fin = db.query(models.ProjectFinancials).filter(
         models.ProjectFinancials.project_id == p.id
-    ).order_by(models.ProjectFinancials.updated_at.desc()).first()
+    ).order_by(models.ProjectFinancials.updated_at.desc(), models.ProjectFinancials.id.desc()).first()
     pcs = db.query(models.ProjectContractor).filter(
         models.ProjectContractor.project_id == p.id
     ).all()
@@ -157,14 +157,16 @@ def get_compliance(
 
     ca = db.query(models.ComplianceAssessment).filter(
         models.ComplianceAssessment.project_id == project_id
-    ).order_by(models.ComplianceAssessment.assessed_at.desc()).first()
+    ).order_by(
+        models.ComplianceAssessment.assessed_at.desc(),
+        models.ComplianceAssessment.id.desc(),
+    ).first()
 
     if not ca:
-        # No persisted assessment; run one on-the-fly but DO persist it
-        # so that subsequent GETs and dashboard aggregation work.
-        context = _build_project_context(p, db)
-        aggregator = ComplianceAggregator()
-        result = aggregator.assess(context)
-        ca = _persist_assessment(db, project_id, result)
+        return schemas.ComplianceAssessmentResponse(
+            project_id=project_id,
+            overall_status="NOT_ASSESSABLE",
+            checks=[],
+        )
 
     return _format_response(project_id, ca, db)

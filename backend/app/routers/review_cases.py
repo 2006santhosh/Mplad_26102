@@ -21,7 +21,7 @@ Language safety:
 """
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session, joinedload
-from sqlalchemy import func, desc
+from sqlalchemy import func, desc, text
 from typing import List, Optional
 import datetime
 
@@ -96,6 +96,9 @@ def create_review_case(
     
     An official opens a case after reviewing AI signals.
     """
+    if db.bind.dialect.name == "sqlite":
+        db.execute(text("BEGIN IMMEDIATE"))
+
     # Verify project exists
     project = db.query(models.Project).filter(
         models.Project.id == payload.project_id
@@ -340,6 +343,8 @@ def update_review_case(
         ).first()
         if not assignee:
             raise HTTPException(status_code=404, detail="Assignee user not found")
+        if assignee.role not in _reviewer_roles:
+            raise HTTPException(status_code=403, detail="Assignee must have an authorized reviewer role")
         previous_assignee_id = case.assigned_to_id
         case.assigned_to_id = payload.assigned_to_id
         case.updated_at = now

@@ -19,10 +19,10 @@ class PredictiveCompletionRiskEngine:
         score = 0
 
         # 1. Gather Data
-        prog = sorted(p.progress, key=lambda x: x.reported_at)
-        fin = sorted(p.financials, key=lambda x: x.updated_at)
-        risk_history = sorted(p.risk_assessments, key=lambda x: x.created_at)
-        comp_history = sorted(p.compliance_assessments, key=lambda x: x.assessed_at)
+        prog = sorted(p.progress, key=lambda x: (x.reported_at, x.id))
+        fin = sorted(p.financials, key=lambda x: (x.updated_at, x.id))
+        risk_history = sorted(p.risk_assessments, key=lambda x: (x.created_at, x.id))
+        comp_history = sorted(p.compliance_assessments, key=lambda x: (x.assessed_at, x.id))
 
         latest_prog_pct = prog[-1].percentage if prog and prog[-1].percentage is not None else None
         latest_exp_val = float(fin[-1].expenditure) if fin and fin[-1].expenditure is not None else None
