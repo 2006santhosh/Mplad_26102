@@ -1,4 +1,4 @@
-import { useEffect, useState, useMemo } from 'react';
+import { useEffect, useState } from 'react';
 import { getProjects } from '../lib/api';
 import { Link } from 'react-router-dom';
 import { 
@@ -23,49 +23,35 @@ export const ProjectRegister = () => {
   const [page, setPage] = useState(1);
   const pageSize = 20;
 
+  const [totalCount, setTotalCount] = useState(0);
+
   useEffect(() => {
     setLoading(true);
-    getProjects()
+    const params: Record<string, any> = {
+      skip: (page - 1) * pageSize,
+      limit: pageSize
+    };
+    if (search) params.search = search;
+    if (stageFilter !== 'ALL') params.stage = stageFilter;
+    if (riskFilter !== 'ALL') params.risk = riskFilter;
+    
+    getProjects(params)
       .then((data) => {
-        setProjects(data || []);
+        setProjects(data?.items || []);
+        setTotalCount(data?.total || 0);
       })
       .catch((err) => {
         console.error('Failed to load projects', err);
       })
       .finally(() => setLoading(false));
-  }, []);
+  }, [search, stageFilter, riskFilter, page]);
 
-  const stages = useMemo(() => {
-    const s = new Set<string>();
-    projects.forEach((p) => {
-      if (p.work_stage) s.add(p.work_stage);
-    });
-    return Array.from(s).sort();
-  }, [projects]);
+  const stages = [
+    'Sanctioned', 'Work Awarded', 'Physical Inspection', 'Work Completed', 'Ongoing', 'Delayed', 'Not Started'
+  ];
 
-  const filteredProjects = useMemo(() => {
-    return projects.filter((p) => {
-      const q = search.toLowerCase().trim();
-      const matchesSearch =
-        !q ||
-        (p.work_id && String(p.work_id).toLowerCase().includes(q)) ||
-        (p.category && p.category.toLowerCase().includes(q)) ||
-        (p.mp_name && p.mp_name.toLowerCase().includes(q)) ||
-        (p.district && p.district.toLowerCase().includes(q)) ||
-        (p.description && p.description.toLowerCase().includes(q));
-
-      const matchesStage = stageFilter === 'ALL' || p.work_stage === stageFilter;
-      const matchesRisk = riskFilter === 'ALL' || p.latest_risk_level === riskFilter;
-
-      return matchesSearch && matchesStage && matchesRisk;
-    });
-  }, [projects, search, stageFilter, riskFilter]);
-
-  const totalPages = Math.ceil(filteredProjects.length / pageSize) || 1;
-  const paginatedProjects = useMemo(() => {
-    const start = (page - 1) * pageSize;
-    return filteredProjects.slice(start, start + pageSize);
-  }, [filteredProjects, page, pageSize]);
+  const totalPages = Math.ceil(totalCount / pageSize) || 1;
+  const paginatedProjects = projects; // Projects are already paginated by the server
 
   const handleSearchChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setSearch(e.target.value);
@@ -352,13 +338,13 @@ export const ProjectRegister = () => {
           <div>
             Showing{' '}
             <span className="font-semibold text-gray-900">
-              {filteredProjects.length === 0 ? 0 : (page - 1) * pageSize + 1}
+              {totalCount === 0 ? 0 : (page - 1) * pageSize + 1}
             </span>{' '}
             to{' '}
             <span className="font-semibold text-gray-900">
-              {Math.min(page * pageSize, filteredProjects.length)}
+              {Math.min(page * pageSize, totalCount)}
             </span>{' '}
-            of <span className="font-semibold text-gray-900">{filteredProjects.length}</span> official works
+            of <span className="font-semibold text-gray-900">{totalCount}</span> official works
           </div>
 
           <div className="flex items-center gap-2">

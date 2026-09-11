@@ -1,7 +1,7 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 from ..database import get_db
-from .. import schemas
+from .. import schemas, models
 from .projects import _get_project_context
 from ..risk_engine.aggregator import RiskAggregator
 from datetime import date, timedelta
@@ -29,6 +29,26 @@ def analyze_pre_sanction(req: schemas.PreSanctionRequest, db: Session = Depends(
     
     agg = RiskAggregator()
     res = agg.calculate_risk(target, context)
+
+    assessment = models.PreSanctionAssessment(
+        proposed_category=req.category,
+        proposed_amount=req.sanctioned_amount,
+        description=req.location,
+        risk_score=res.get('score'),
+        risk_level=res.get('level', 'LIMITED'),
+        assessment_status=res.get('assessment_status'),
+        assessment_coverage_pct=res.get('assessment_coverage', {}).get('percentage'),
+        risk_reasons=res.get('risk_reasons', []),
+        indicators=res.get('indicators', []),
+        provenance='AI ASSESSMENT',
+        engine_version='5.0.0',
+    )
+    db.add(assessment)
+    db.flush()
+    official_user = db.query(models.User).filter(models.User.username == current_user.get('sub')).first()
+    if official_user:
+        db.add(models.AuditLog(user_id=official_user.id, action='PRE_SANCTION_ASSESSMENT', entity_type='PreSanctionAssessment', entity_id=assessment.id, details='Persisted analytical pre-sanction assessment'))
+    db.commit()
     
     return schemas.RiskAssessmentResponse(
         score=res['score'],
@@ -49,3 +69,9 @@ def analyze_pre_sanction(req: schemas.PreSanctionRequest, db: Session = Depends(
             data_provenance=i.get('data_provenance', 'UNAVAILABLE')
         ) for i in res['indicators']]
     )
+
+@router.get('/history', response_model=list[schemas.PreSanctionAssessmentResponse])
+def pre_sanction_history(limit: int = Query(50, ge=1, le=200), db: Session = Depends(get_db), current_user: dict = Depends(get_current_user)):
+    return db.query(models.PreSanctionAssessment).order_by(
+        models.PreSanctionAssessment.assessed_at.desc(), models.PreSanctionAssessment.id.desc()
+    ).limit(limit).all()

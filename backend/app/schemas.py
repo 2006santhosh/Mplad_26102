@@ -82,6 +82,7 @@ class DashboardStatsResponse(BaseModel):
     review_priority_medium: Optional[int] = None
     review_priority_low: Optional[int] = None
     insufficient_evidence_projects: Optional[int] = None
+    portfolio_breakdown: Optional[Dict[str, List[dict]]] = None
 
 class EarlyWarningOverview(BaseModel):
     critical: int = 0
@@ -141,6 +142,8 @@ class ProjectResponse(ProjectBase):
     provenance: Optional[dict] = None
     predictive_risk_level: Optional[str] = None
     review_priority_level: Optional[str] = "LOW"
+    state: Optional[str] = None
+    warning_levels: Optional[Dict[str, int]] = None
     
     class Config:
         from_attributes = True
@@ -188,6 +191,33 @@ class PreSanctionRequest(BaseModel):
     location: str
     planned_duration_days: int
     contractor_id: Optional[int] = None
+
+class PreSanctionAssessmentResponse(BaseModel):
+    id: int
+    proposed_category: Optional[str] = None
+    proposed_amount: Optional[float] = None
+    description: Optional[str] = None
+    risk_score: Optional[int] = None
+    risk_level: str
+    assessment_status: Optional[str] = None
+    assessment_coverage_pct: Optional[float] = None
+    risk_reasons: List[str] = []
+    indicators: List[dict] = []
+    provenance: str
+    engine_version: Optional[str] = None
+    assessed_at: datetime
+
+    class Config:
+        from_attributes = True
+
+class WarningStatusUpdate(BaseModel):
+    status: str
+
+    @validator('status')
+    def validate_status(cls, v):
+        if v not in ['ACKNOWLEDGED', 'UNDER_REVIEW', 'RESOLVED', 'DISMISSED']:
+            raise ValueError('Invalid warning status')
+        return v
 
 class LoginRequest(BaseModel):
     username: str

@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from sqlalchemy.orm import Session, joinedload
 import pandas as pd
 from ..database import get_db
@@ -78,15 +78,37 @@ def _get_project_context(db: Session):
 
 @router.get("", response_model=list[schemas.ProjectResponse])
 @router.get("/", response_model=list[schemas.ProjectResponse])
-def get_projects(include_demo: bool = False, db: Session = Depends(get_db), current_user: dict = Depends(get_current_user)):
+def get_projects(response: Response, include_demo: bool = False, skip: int = Query(0, ge=0), limit: int = Query(2500, ge=1, le=5000),
+                 search: str | None = None, stage: str | None = None, risk: str | None = None,
+                 priority_filter: str | None = None, warning: bool | None = None, mp_id: int | None = None,
+                 state: str | None = None, district: str | None = None, category: str | None = None,
+                 db: Session = Depends(get_db), current_user: dict = Depends(get_current_user)):
     query = db.query(models.Project).options(
         joinedload(models.Project.mp),
         joinedload(models.Project.data_source),
     )
     if not include_demo:
         query = query.join(models.DataSource).filter(models.DataSource.source_type == "OFFICIAL")
-    
-    projects = query.all()
+    if search:
+        term = f"%{search.strip()}%"
+        query = query.filter(
+            models.Project.work_id.ilike(term) |
+            models.Project.category.ilike(term) |
+            models.Project.description.ilike(term) |
+            models.Project.district.ilike(term)
+        )
+    if stage:
+        query = query.filter(models.Project.work_stage == stage)
+    if mp_id:
+        query = query.filter(models.Project.mp_id == mp_id)
+    if state:
+        query = query.join(models.MP)
+        query = query.filter(models.MP.state == state)
+    if district:
+        query = query.filter(models.Project.district == district)
+    if category:
+        query = query.filter(models.Project.category == category)
+    projects = query.order_by(models.Project.id.asc()).all()
     
     # Fast bulk maps for 1-query performance across thousands of official works
     progress_rows = db.query(
@@ -115,6 +137,21 @@ def get_projects(include_demo: bool = False, db: Session = Depends(get_db), curr
     ew_map = {}
     for row in ew_rows:
         ew_map[row[0]] = ew_map.get(row[0], 0) + 1
+
+    warning_rows = db.query(models.EarlyWarning.project_id, models.EarlyWarning.warning_level).filter(
+        models.EarlyWarning.status.in_(["OPEN", "ACKNOWLEDGED", "UNDER_REVIEW"])
+    ).all()
+    warning_level_map = {}
+    for project_id, level in warning_rows:
+        levels = warning_level_map.setdefault(project_id, {})
+        levels[level] = levels.get(level, 0) + 1
+
+    history_rows = db.query(models.RiskHistory.project_id, models.RiskHistory.risk_score).order_by(
+        models.RiskHistory.recorded_at.asc(), models.RiskHistory.id.asc()
+    ).all()
+    history_map = {}
+    for project_id, score in history_rows:
+        history_map.setdefault(project_id, []).append(score)
 
     # Predictive Completion Map
     pred_rows = db.query(
@@ -186,16 +223,40 @@ def get_projects(include_demo: bool = False, db: Session = Depends(get_db), curr
         ew_count = ew_map.get(p.id, 0)
         pred_lvl = pred_map.get(p.id)
 
-        priority = calculate_review_priority(
+        priority_result = calculate_review_priority(
             overall_risk={"level": risk_info[1], "score": risk_info[0], "coverage": risk_info[2]},
-            risk_trend={"trend": "STABLE", "explanation": "Risk levels have remained stable."},
+            risk_trend=_risk_trend(history_map.get(p.id, [])),
             compliance={"status": comp_status},
-            open_warnings=[{"level": "LOW"}] * ew_count,
+            open_warnings=[{"level": level, "type": "Early Warning", "explanation": "Open analytical warning."} for level, count in warning_level_map.get(p.id, {}).items() for _ in range(count)],
             completion_risk={"level": pred_lvl, "confidence": None},
         )
-        resp.review_priority_level = priority["level"]
+        resp.review_priority_level = priority_result["level"]
+        resp.state = p.mp.state if p.mp else None
+        resp.warning_levels = warning_level_map.get(p.id, {})
+        if risk and risk_info[1] != risk:
+            continue
+        if priority_filter and priority_result["level"] != priority_filter:
+            continue
+        if warning is True and not warning_level_map.get(p.id):
+            continue
+        if warning is False and warning_level_map.get(p.id):
+            continue
         results.append(resp)
-    return results
+        
+    response.headers["X-Total-Count"] = str(len(results))
+    response.headers["Access-Control-Expose-Headers"] = "X-Total-Count"
+    return results[skip:skip+limit]
+
+def _risk_trend(scores: list[int | None]) -> dict:
+    valid = [score for score in scores if score is not None]
+    if len(valid) < 2:
+        return {"trend": "INSUFFICIENT_HISTORY", "explanation": "Not enough historical risk assessments to determine a trend."}
+    delta = valid[-1] - valid[0]
+    if delta > 10:
+        return {"trend": "INCREASING", "explanation": "Risk has increased significantly over the available assessment history."}
+    if delta < -10:
+        return {"trend": "DECREASING", "explanation": "Risk has decreased over the available assessment history."}
+    return {"trend": "STABLE", "explanation": "Risk levels have remained stable over the available assessment history."}
 
 @router.get("/map", response_model=schemas.MapResponse)
 def get_map_data(db: Session = Depends(get_db), current_user: dict = Depends(get_current_user)):

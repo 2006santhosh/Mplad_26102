@@ -153,6 +153,12 @@ class PreSanctionAssessment(Base):
     description = Column(String)
     risk_score = Column(Integer)
     risk_level = Column(String)
+    assessment_status = Column(String, nullable=True)
+    assessment_coverage_pct = Column(Float, nullable=True)
+    risk_reasons = Column(JSON, nullable=True)
+    indicators = Column(JSON, nullable=True)
+    provenance = Column(String, nullable=False, server_default="AI ASSESSMENT")
+    engine_version = Column(String, nullable=True)
     assessed_at = Column(DateTime, default=datetime.datetime.utcnow)
 
 class ReviewLog(Base):

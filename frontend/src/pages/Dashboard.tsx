@@ -21,6 +21,7 @@ export const Dashboard = () => {
   const [stats, setStats] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [showRiskBreakdown, setShowRiskBreakdown] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     setLoading(true);
@@ -30,10 +31,12 @@ export const Dashboard = () => {
       getDashboardStats().catch(() => null)
     ])
       .then(([pList, cData, sData]) => {
-        setProjects(pList || []);
+        setProjects(pList?.items || pList || []);
         setClusters(cData);
         setStats(sData);
+        if (!sData) setError('Dashboard statistics could not be loaded.');
       })
+      .catch(() => setError('Official project data could not be loaded. Please refresh and try again.'))
       .finally(() => setLoading(false));
   }, []);
 
@@ -45,6 +48,7 @@ export const Dashboard = () => {
           <span>Synchronizing authentic government MPLADS records and spatial indices...</span>
         </div>
       )}
+      {error && <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">{error}</div>}
       {/* Top Banner & Title */}
       <header className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-gray-200 pb-6">
         <div>
@@ -343,6 +347,25 @@ export const Dashboard = () => {
                     ₹{(cat.total_amount / 10000000).toFixed(2)} Cr
                   </span>
                 </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {stats?.portfolio_breakdown && (
+        <div className="bg-white rounded-xl shadow-xs border border-gray-200 p-6">
+          <h3 className="text-lg font-bold text-gray-900">Portfolio Drilldown</h3>
+          <p className="text-xs text-gray-500 mt-1">Official record counts by administrative and implementation group.</p>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-4">
+            {Object.entries(stats.portfolio_breakdown).map(([group, values]: [string, any]) => (
+              <div key={group} className="border border-gray-200 rounded-lg p-3">
+                <h4 className="text-xs font-bold uppercase text-gray-600 mb-2">{group}</h4>
+                {(values as any[]).slice(0, 5).map((item: any) => (
+                  <div key={item.name} className="flex justify-between text-xs py-1 border-b border-gray-100 last:border-0">
+                    <span className="truncate pr-2">{item.name}</span><span className="font-mono font-bold">{item.count}</span>
+                  </div>
+                ))}
               </div>
             ))}
           </div>

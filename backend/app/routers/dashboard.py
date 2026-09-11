@@ -144,6 +144,18 @@ def get_dashboard_stats(db: Session = Depends(get_db), current_user: dict = Depe
         ))
     category_stats.sort(key=lambda x: x.count, reverse=True)
 
+    def grouped_counts(values):
+        counts = defaultdict(int)
+        for value in values:
+            counts[value or "Unknown"] += 1
+        return [{"name": name, "count": count} for name, count in sorted(counts.items(), key=lambda item: (-item[1], item[0]))[:10]]
+
+    portfolio_breakdown = {
+        "states": grouped_counts([p.mp.state if p.mp else None for p in projects]),
+        "districts": grouped_counts([p.district for p in projects]),
+        "stages": grouped_counts([p.work_stage for p in projects]),
+    }
+
     # Compliance Intelligence Summary
     compliance_pass = 0
     compliance_review = 0
@@ -250,7 +262,26 @@ def get_dashboard_stats(db: Session = Depends(get_db), current_user: dict = Depe
     # EW map for priority
     ew_map = {}
     for w in early_warnings:
-        ew_map[w.project_id] = ew_map.get(w.project_id, 0) + 1
+        ew_map.setdefault(w.project_id, []).append(w.warning_level)
+
+    # Risk history map for trend
+    history_rows = db.query(models.RiskHistory.project_id, models.RiskHistory.risk_score).order_by(
+        models.RiskHistory.recorded_at.asc(), models.RiskHistory.id.asc()
+    ).all()
+    history_map = {}
+    for pid, score in history_rows:
+        history_map.setdefault(pid, []).append(score)
+        
+    def _risk_trend(scores: list[int | None]) -> dict:
+        valid = [score for score in scores if score is not None]
+        if len(valid) < 2:
+            return {"trend": "INSUFFICIENT_HISTORY", "explanation": "Not enough historical risk assessments to determine a trend."}
+        delta = valid[-1] - valid[0]
+        if delta > 10:
+            return {"trend": "INCREASING", "explanation": "Risk has increased significantly over the available assessment history."}
+        if delta < -10:
+            return {"trend": "DECREASING", "explanation": "Risk has decreased over the available assessment history."}
+        return {"trend": "STABLE", "explanation": "Risk levels have remained stable over the available assessment history."}
 
     for p in projects:
         # Predictive
@@ -268,13 +299,14 @@ def get_dashboard_stats(db: Session = Depends(get_db), current_user: dict = Depe
         # Calculate Review Priority through the canonical service.
         risk_lvl, risk_cov = risk_map.get(p.id, (None, None))
         comp_status = comp_map.get(p.id, "NOT_ASSESSABLE")
-        ew_count = ew_map.get(p.id, 0)
+        warning_levels = ew_map.get(p.id, [])
+        warnings_data = [{"level": level, "type": "Early Warning", "explanation": "Open analytical warning."} for level in warning_levels]
 
         priority = calculate_review_priority(
             overall_risk={"level": risk_lvl, "score": None, "coverage": risk_cov},
-            risk_trend={"trend": "STABLE", "explanation": "Risk levels have remained stable."},
+            risk_trend=_risk_trend(history_map.get(p.id, [])),
             compliance={"status": comp_status},
-            open_warnings=[{"level": "LOW"}] * ew_count,
+            open_warnings=warnings_data,
             completion_risk={"level": pred_lvl, "confidence": None},
         )
         if risk_cov is not None and risk_cov < 30.0:
@@ -317,4 +349,5 @@ def get_dashboard_stats(db: Session = Depends(get_db), current_user: dict = Depe
         review_priority_medium=pri_med,
         review_priority_low=pri_low,
         insufficient_evidence_projects=insufficient_ev
+        ,portfolio_breakdown=portfolio_breakdown
     )

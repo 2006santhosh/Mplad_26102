@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import {
   getProjectDetails, getDecisionSupport, getReviews, postReview, getProjectReviewCases, createReviewCase,
-  runRiskAssessment, assessCompliance, assessEarlyWarnings, assessPredictiveCompletionRisk
+  runRiskAssessment, assessCompliance, assessEarlyWarnings, assessPredictiveCompletionRisk, downloadProjectExport, updateEarlyWarning
 } from '../lib/api';
 import { 
   ShieldCheck, AlertTriangle, AlertCircle, Clock, CheckCircle, 
@@ -27,6 +27,7 @@ export const ProjectIntelligence = () => {
   const [runningAssessment, setRunningAssessment] = useState<string | null>(null);
   const [assessmentMessage, setAssessmentMessage] = useState<string | null>(null);
   const [assessmentError, setAssessmentError] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   useEffect(() => {
     if (id) {
@@ -37,7 +38,7 @@ export const ProjectIntelligence = () => {
         getDecisionSupport(numId).then(setDecisionSupport),
         getReviews(numId).then(setReviews).catch(() => {}),
         getProjectReviewCases(numId).then(setProjectCases).catch(() => {}),
-      ]).finally(() => setLoading(false));
+      ]).catch(() => setLoadError('Project intelligence could not be loaded. Please refresh and try again.')).finally(() => setLoading(false));
     }
   }, [id]);
 
@@ -116,7 +117,8 @@ export const ProjectIntelligence = () => {
   };
 
   if (loading) return <div className="p-8 flex items-center gap-2"><Clock className="w-5 h-5 animate-spin" /> Loading official records...</div>;
-  if (!project) return <div className="p-8">Project not found.</div>;
+  if (loadError) return <div className="p-8 text-red-700">{loadError}</div>;
+  if (!project) return <div className="p-8">Project not found. The official record may be unavailable.</div>;
 
   const getPriorityColor = (level: string) => {
     switch (level) {
@@ -155,10 +157,16 @@ export const ProjectIntelligence = () => {
         </div>
         <div className="flex space-x-2">
           <button 
-            onClick={() => window.print()}
+            onClick={() => downloadProjectExport(Number(id), 'json').catch(() => setAssessmentError('JSON export failed.'))}
             className="bg-white border border-gray-300 hover:bg-gray-50 text-gray-700 px-4 py-2 rounded-md font-medium shadow-sm transition"
           >
-            Export Report
+            Export JSON Report
+          </button>
+          <button
+            onClick={() => downloadProjectExport(Number(id), 'csv').catch(() => setAssessmentError('CSV export failed.'))}
+            className="bg-white border border-gray-300 hover:bg-gray-50 text-gray-700 px-4 py-2 rounded-md font-medium shadow-sm transition"
+          >
+            Export CSV
           </button>
         </div>
       </div>
@@ -379,6 +387,13 @@ export const ProjectIntelligence = () => {
                                  <span className="text-xs text-gray-500 font-mono">{w.status}</span>
                                </div>
                                <p className="mt-2 text-sm text-gray-900 font-medium">{w.explanation}</p>
+                               {!['RESOLVED', 'DISMISSED'].includes(w.status) && (
+                                 <div className="mt-2 flex gap-2">
+                                   {w.status === 'OPEN' && <button className="text-[11px] text-indigo-700 underline" onClick={() => updateEarlyWarning(Number(id), w.id, 'ACKNOWLEDGED').then(() => getDecisionSupport(Number(id)).then(setDecisionSupport))}>Acknowledge</button>}
+                                   {['OPEN', 'ACKNOWLEDGED'].includes(w.status) && <button className="text-[11px] text-indigo-700 underline" onClick={() => updateEarlyWarning(Number(id), w.id, 'UNDER_REVIEW').then(() => getDecisionSupport(Number(id)).then(setDecisionSupport))}>Under review</button>}
+                                   {['ACKNOWLEDGED', 'UNDER_REVIEW'].includes(w.status) && <button className="text-[11px] text-emerald-700 underline" onClick={() => updateEarlyWarning(Number(id), w.id, 'RESOLVED').then(() => getDecisionSupport(Number(id)).then(setDecisionSupport))}>Resolve</button>}
+                                 </div>
+                               )}
                                <div className="mt-2 text-[10px]"><ProvenanceBadge type={w.provenance} /></div>
                             </div>
                          ))}

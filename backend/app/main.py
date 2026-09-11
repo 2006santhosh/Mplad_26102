@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from .routers import projects, pre_sanction, auth, compliance, trends, early_warning, projected_completion, predictive_completion, comparison, gis, review, dashboard, decision_support, review_cases
+from .routers import projects, pre_sanction, auth, compliance, trends, early_warning, projected_completion, predictive_completion, comparison, gis, review, dashboard, decision_support, review_cases, reports
 
 app = FastAPI(title="SIH26102 MPLAD Risk Intelligence API", version="1.0.0")
 
@@ -26,6 +26,7 @@ app.include_router(review.router)
 app.include_router(dashboard.router)
 app.include_router(decision_support.router)
 app.include_router(review_cases.router)
+app.include_router(reports.router)
 
 @app.get("/")
 def read_root():

@@ -41,9 +41,12 @@ export const logout = () => {
   window.location.href = '/login';
 };
 
-export const getProjects = async () => {
-  const res = await api.get('/api/projects');
-  return res.data;
+export const getProjects = async (params?: Record<string, string | number | boolean>) => {
+  const res = await api.get('/api/projects', { params });
+  return {
+    items: res.data,
+    total: parseInt(res.headers['x-total-count'] || '0', 10)
+  };
 };
 
 export const getProjectDetails = async (id: number) => {
@@ -109,6 +112,26 @@ export const getDashboardStats = async () => {
 export const runPreSanction = async (data: any) => {
   const res = await api.post('/api/pre-sanction/', data);
   return res.data;
+};
+
+export const getPreSanctionHistory = async () => {
+  const res = await api.get('/api/pre-sanction/history');
+  return res.data;
+};
+
+export const updateEarlyWarning = async (projectId: number, warningId: number, status: string) => {
+  const res = await api.patch(`/api/projects/${projectId}/early-warning/${warningId}`, { status });
+  return res.data;
+};
+
+export const downloadProjectExport = async (projectId: number, format: 'json' | 'csv') => {
+  const response = await api.get(`/api/reports/projects/${projectId}.${format}`, { responseType: 'blob' });
+  const url = URL.createObjectURL(response.data);
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.download = `mplad-project-${projectId}.${format}`;
+  anchor.click();
+  URL.revokeObjectURL(url);
 };
 
 export const assessCompliance = async (projectId: number) => {

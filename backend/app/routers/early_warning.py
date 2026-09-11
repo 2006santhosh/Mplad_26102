@@ -91,3 +91,35 @@ def assess_project_warnings(
         warnings=_serialize_warnings(warnings),
         source_type="Early Warning Engine",
     )
+
+@router.patch("/{project_id}/early-warning/{warning_id}", response_model=schemas.EarlyWarningItem)
+def update_warning_status(project_id: int, warning_id: int, payload: schemas.WarningStatusUpdate,
+                          db: Session = Depends(get_db), user: dict = Depends(RoleChecker(["Admin", "Auditor", "State", "District"]))):
+    warning = db.query(models.EarlyWarning).filter(
+        models.EarlyWarning.id == warning_id,
+        models.EarlyWarning.project_id == project_id,
+    ).first()
+    if not warning:
+        raise HTTPException(status_code=404, detail="Early warning not found")
+    allowed = {
+        "OPEN": {"ACKNOWLEDGED", "UNDER_REVIEW", "DISMISSED"},
+        "ACKNOWLEDGED": {"UNDER_REVIEW", "RESOLVED", "DISMISSED"},
+        "UNDER_REVIEW": {"RESOLVED", "DISMISSED"},
+        "RESOLVED": set(),
+        "DISMISSED": set(),
+    }
+    if payload.status not in allowed.get(warning.status, set()):
+        raise HTTPException(status_code=422, detail=f"Invalid warning transition: {warning.status} -> {payload.status}")
+    official_user = db.query(models.User).filter(models.User.username == user.get('sub')).first()
+    if official_user:
+        db.add(models.AuditLog(
+            user_id=official_user.id,
+            action='EARLY_WARNING_STATUS_CHANGED',
+            entity_type='EarlyWarning',
+            entity_id=warning.id,
+            details=f'{warning.status} -> {payload.status}; project_id={project_id}',
+        ))
+    warning.status = payload.status
+    db.commit()
+    db.refresh(warning)
+    return _serialize_warnings([warning])[0]
