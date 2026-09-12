@@ -5,6 +5,7 @@ from ..database import get_db
 from .. import models, schemas
 from ..auth_utils import get_current_user
 from ..services.review_priority import calculate_review_priority
+from ..official_data import OFFICIAL, official_projects_query
 from collections import defaultdict
 
 router = APIRouter(prefix="/api/dashboard", tags=["dashboard"])
@@ -12,14 +13,12 @@ router = APIRouter(prefix="/api/dashboard", tags=["dashboard"])
 @router.get("/stats", response_model=schemas.DashboardStatsResponse)
 def get_dashboard_stats(db: Session = Depends(get_db), current_user: dict = Depends(get_current_user)):
     # 1. MP Allocations (Official Government CSV)
-    mps = db.query(models.MP).all()
+    mps = db.query(models.MP).join(models.DataSource).filter(models.DataSource.source_type == OFFICIAL).all()
     total_mps = len(mps)
     total_allocated_amount = sum((float(mp.allocated_amount) if mp.allocated_amount else 0.0) for mp in mps)
 
     # 2. Official Government Projects (eSAKSHI Work Dataset)
-    projects = db.query(models.Project).outerjoin(models.DataSource).filter(
-        (models.DataSource.source_type == "OFFICIAL") | (models.DataSource.id.is_(None))
-    ).all()
+    projects = official_projects_query(db).all()
     total_projects = len(projects)
 
     # Financials
@@ -195,6 +194,7 @@ def get_dashboard_stats(db: Session = Depends(get_db), current_user: dict = Depe
 
     # Early Warnings
     early_warnings = db.query(models.EarlyWarning).filter(
+        models.EarlyWarning.project_id.in_(project_ids),
         models.EarlyWarning.status.in_(["OPEN", "ACKNOWLEDGED", "UNDER_REVIEW"])
     ).order_by(models.EarlyWarning.detected_at.desc(), models.EarlyWarning.id.desc()).all()
     ew_critical = ew_high = ew_medium = ew_low = 0
@@ -320,34 +320,67 @@ def get_dashboard_stats(db: Session = Depends(get_db), current_user: dict = Depe
 
     return schemas.DashboardStatsResponse(
         total_projects=total_projects,
+        total_projects_provenance="OFFICIAL",
         total_sanctioned_amount=total_sanctioned,
+        total_sanctioned_amount_provenance="DERIVED",
         total_expenditure=total_expenditure,
+        total_expenditure_provenance="DERIVED",
         utilization_percentage=utilization_pct,
+        utilization_percentage_provenance="DERIVED",
         total_mps=total_mps,
+        total_mps_provenance="OFFICIAL",
         total_allocated_amount=total_allocated_amount,
+        total_allocated_amount_provenance="DERIVED",
         projects_with_progress=progress_count,
+        projects_with_progress_provenance="DERIVED",
         average_progress=average_progress,
+        average_progress_provenance="DERIVED",
         ai_risk_projects=len(ai_risk_projects),
+        ai_risk_projects_provenance="DERIVED",
         ai_risk_signal_total=ai_risk_signal_total,
+        ai_risk_signal_total_provenance="DERIVED",
         ai_risk_signal_breakdown=signal_breakdown_list,
+        ai_risk_signal_breakdown_provenance="DERIVED",
         human_review_flags=len(human_flags),
+        human_review_flags_provenance="DERIVED",
         delayed_projects=len(delayed_projects),
+        delayed_projects_provenance="DERIVED",
         projects_requiring_attention=len(attention_projects),
+        projects_requiring_attention_provenance="DERIVED",
         gps_coverage_percentage=gps_coverage,
+        gps_coverage_percentage_provenance="DERIVED",
         risk_distribution=schemas.RiskDistribution(**risk_distribution),
+        risk_distribution_provenance="DERIVED",
         projects_by_category=category_stats,
-        compliance_pass_count=compliance_pass if compliance_assessed > 0 else None,
-        compliance_review_count=compliance_review if compliance_assessed > 0 else None,
-        compliance_not_assessable_count=compliance_na if compliance_assessed > 0 else None,
-        compliance_assessed_projects=compliance_assessed if compliance_assessed > 0 else None,
+        projects_by_category_provenance="DERIVED",
         early_warnings=ew_overview,
+        early_warnings_provenance="DERIVED",
+        compliance_pass_count=compliance_pass if compliance_assessed > 0 else None,
+        compliance_pass_count_provenance="DERIVED",
+        compliance_review_count=compliance_review if compliance_assessed > 0 else None,
+        compliance_review_count_provenance="DERIVED",
+        compliance_not_assessable_count=compliance_na if compliance_assessed > 0 else None,
+        compliance_not_assessable_count_provenance="DERIVED",
+        compliance_assessed_projects=compliance_assessed if compliance_assessed > 0 else None,
+        compliance_assessed_projects_provenance="DERIVED",
         predictive_high_risk=pred_high,
+        predictive_high_risk_provenance="DERIVED",
         predictive_medium_risk=pred_med,
+        predictive_medium_risk_provenance="DERIVED",
         predictive_not_assessable=pred_na,
+        predictive_not_assessable_provenance="DERIVED",
         review_priority_critical=pri_crit,
+        review_priority_critical_provenance="DERIVED",
         review_priority_high=pri_high,
+        review_priority_high_provenance="DERIVED",
         review_priority_medium=pri_med,
+        review_priority_medium_provenance="DERIVED",
         review_priority_low=pri_low,
-        insufficient_evidence_projects=insufficient_ev
-        ,portfolio_breakdown=portfolio_breakdown
+        review_priority_low_provenance="DERIVED",
+        insufficient_evidence_projects=insufficient_ev,
+        insufficient_evidence_projects_provenance="DERIVED",
+        portfolio_breakdown=portfolio_breakdown,
+        portfolio_breakdown_provenance="DERIVED"
     )
+
+

@@ -42,7 +42,7 @@ def setup_db():
     
     from app.models import MP, DataSource
     if not db.query(DataSource).filter(DataSource.id == 999).first():
-        db.add(DataSource(id=999, source_name="Test DS", source_type="Test"))
+        db.add(DataSource(id=999, source_name="Test DS", source_type="OFFICIAL"))
     if not db.query(MP).filter(MP.id == 999).first():
         db.add(MP(id=999, data_source_id=999, name="Test MP", state="Test State", status="Test", tenure="2024", allocated_amount=1.0))
     if not db.query(Project).filter(Project.id == 999).first():

@@ -23,7 +23,7 @@ from app.auth_utils import get_current_user
 from sqlalchemy import create_engine
 from sqlalchemy.pool import StaticPool
 from sqlalchemy.orm import sessionmaker
-from app.models import Base, Project, ProjectProgress, ProjectFinancials, RiskHistory, EarlyWarning
+from app.models import DataSource, Base, Project, ProjectProgress, ProjectFinancials, RiskHistory, EarlyWarning
 from datetime import datetime, date, timedelta
 
 engine = create_engine(
@@ -38,6 +38,9 @@ admin_user = {"sub": "test_admin", "role": "Admin"}
 
 def override_get_db():
     db = TestingSessionLocal()
+    if not db.query(DataSource).filter(DataSource.id == 1).first():
+        db.add(DataSource(id=1, source_name="Official Data", source_type="OFFICIAL"))
+        db.commit()
     try:
         yield db
     finally:
@@ -156,7 +159,7 @@ def setup_module():
     db.commit()
 
     # Risk history for p11 (NULL -> 45 -> 82)
-    from app.models import RiskHistory
+    from app.models import DataSource, RiskHistory
     rh11a = RiskHistory(project_id=11, risk_level="LOW", risk_score=None, recorded_at=datetime.now() - timedelta(days=60))
     rh11b = RiskHistory(project_id=11, risk_level="MEDIUM", risk_score=45, recorded_at=datetime.now() - timedelta(days=30))
     rh11c = RiskHistory(project_id=11, risk_level="HIGH", risk_score=82, recorded_at=datetime.now())

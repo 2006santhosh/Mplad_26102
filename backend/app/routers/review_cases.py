@@ -28,9 +28,18 @@ import datetime
 from ..database import get_db
 from .. import models, schemas
 from ..auth_utils import get_current_user, RoleChecker
+from ..official_data import OFFICIAL, get_official_project_or_404
 from ..models import CASE_TRANSITIONS
 
 router = APIRouter(tags=["review-cases"])
+
+def _official_case_or_404(db: Session, case_id: int):
+    case = db.query(models.ReviewCase).join(models.Project).join(models.DataSource).filter(
+        models.ReviewCase.id == case_id, models.DataSource.source_type == OFFICIAL
+    ).first()
+    if not case:
+        raise HTTPException(status_code=404, detail="Official review case not found")
+    return case
 
 # RBAC helpers
 _reviewer_roles = ['Admin', 'State', 'District', 'Auditor']
@@ -100,11 +109,7 @@ def create_review_case(
         db.execute(text("BEGIN IMMEDIATE"))
 
     # Verify project exists
-    project = db.query(models.Project).filter(
-        models.Project.id == payload.project_id
-    ).first()
-    if not project:
-        raise HTTPException(status_code=404, detail="Project not found")
+    project = get_official_project_or_404(db, payload.project_id)
 
     # Resolve user record
     db_user = db.query(models.User).filter(
@@ -194,8 +199,8 @@ def list_review_cases(
     """
     # Aggregate counts (always across all filters except status)
     def _count(s: str) -> int:
-        return db.query(func.count(models.ReviewCase.id)).filter(
-            models.ReviewCase.status == s
+        return db.query(func.count(models.ReviewCase.id)).join(models.Project).join(models.DataSource).filter(
+            models.ReviewCase.status == s, models.DataSource.source_type == OFFICIAL
         ).scalar() or 0
 
     open_count = _count('OPEN')
@@ -205,7 +210,7 @@ def list_review_cases(
     dismissed_count = _count('DISMISSED')
 
     # Build filtered query with eager load (no N+1)
-    q = db.query(models.ReviewCase).options(
+    q = db.query(models.ReviewCase).join(models.Project).join(models.DataSource).filter(models.DataSource.source_type == OFFICIAL).options(
         joinedload(models.ReviewCase.opened_by),
         joinedload(models.ReviewCase.assigned_to),
     )
@@ -220,8 +225,6 @@ def list_review_cases(
         q = q.filter(models.ReviewCase.project_id == project_id)
 
     if district:
-        # Join project for district filter
-        q = q.join(models.Project, models.ReviewCase.project_id == models.Project.id)
         q = q.filter(models.Project.district == district)
 
     total = q.count()
@@ -252,6 +255,7 @@ def get_review_case(
     db: Session = Depends(get_db),
     current_user: dict = Depends(get_current_user),
 ):
+    _official_case_or_404(db, case_id)
     case = db.query(models.ReviewCase).options(
         joinedload(models.ReviewCase.opened_by),
         joinedload(models.ReviewCase.assigned_to),
@@ -281,11 +285,7 @@ def update_review_case(
     """Server-side validates all status transitions.
     Resolution and dismissal require resolution_note.
     """
-    case = db.query(models.ReviewCase).filter(
-        models.ReviewCase.id == case_id
-    ).first()
-    if not case:
-        raise HTTPException(status_code=404, detail="Review case not found")
+    case = _official_case_or_404(db, case_id)
 
     db_user = db.query(models.User).filter(
         models.User.username == user.get("sub")
@@ -402,11 +402,7 @@ def add_case_note(
     """Notes are append-only. No UPDATE or DELETE endpoint is provided.
     Provenance: OFFICIAL ACTION
     """
-    case = db.query(models.ReviewCase).filter(
-        models.ReviewCase.id == case_id
-    ).first()
-    if not case:
-        raise HTTPException(status_code=404, detail="Review case not found")
+    case = _official_case_or_404(db, case_id)
 
     db_user = db.query(models.User).filter(
         models.User.username == user.get("sub")
@@ -473,11 +469,7 @@ def add_case_action(
       - confirmed=True in the request body
       - A non-empty reason/comment
     """
-    case = db.query(models.ReviewCase).filter(
-        models.ReviewCase.id == case_id
-    ).first()
-    if not case:
-        raise HTTPException(status_code=404, detail="Review case not found")
+    case = _official_case_or_404(db, case_id)
 
     db_user = db.query(models.User).filter(
         models.User.username == user.get("sub")
@@ -547,11 +539,7 @@ def get_case_audit(
     """Read-only. Audit events are never deleted.
     Every event shows: WHO (user), WHAT (action), WHEN (created_at).
     """
-    case = db.query(models.ReviewCase).filter(
-        models.ReviewCase.id == case_id
-    ).first()
-    if not case:
-        raise HTTPException(status_code=404, detail="Review case not found")
+    case = _official_case_or_404(db, case_id)
 
     events = db.query(models.CaseAuditEvent).options(
         joinedload(models.CaseAuditEvent.user)
@@ -576,11 +564,7 @@ def get_project_review_cases(
     db: Session = Depends(get_db),
     current_user: dict = Depends(get_current_user),
 ):
-    project = db.query(models.Project).filter(
-        models.Project.id == project_id
-    ).first()
-    if not project:
-        raise HTTPException(status_code=404, detail="Project not found")
+    project = get_official_project_or_404(db, project_id)
 
     cases = db.query(models.ReviewCase).options(
         joinedload(models.ReviewCase.opened_by),

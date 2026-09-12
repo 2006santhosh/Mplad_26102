@@ -3,6 +3,7 @@ from sqlalchemy.orm import Session
 from ..database import get_db
 from .. import models, schemas
 from ..auth_utils import get_current_user
+from ..official_data import get_official_project_or_404
 import datetime
 import math
 
@@ -19,9 +20,7 @@ def create_unknown(project_id: int, message: str) -> schemas.ProjectedCompletion
 
 @router.get("/{project_id}", response_model=schemas.ProjectedCompletionRiskResponse)
 def get_projected_completion_risk(project_id: int, db: Session = Depends(get_db), current_user: dict = Depends(get_current_user)):
-    p = db.query(models.Project).filter(models.Project.id == project_id).first()
-    if not p:
-        raise HTTPException(status_code=404, detail="Project not found")
+    p = get_official_project_or_404(db, project_id)
 
     if p.status == "COMPLETED":
         return schemas.ProjectedCompletionRiskResponse(

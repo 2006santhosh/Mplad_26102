@@ -15,6 +15,9 @@ models.Base.metadata.create_all(bind=engine)
 
 def override_get_db():
     db = TestingSessionLocal()
+    if not db.query(models.DataSource).filter(models.DataSource.id == 1).first():
+        db.add(models.DataSource(id=1, source_name="Official Data", source_type="OFFICIAL"))
+        db.commit()
     try:
         yield db
     finally:

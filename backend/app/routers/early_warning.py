@@ -4,6 +4,7 @@ from ..database import get_db
 from .. import models, schemas
 from ..auth_utils import get_current_user, RoleChecker
 from ..risk_engine.early_warning import EarlyWarningEngine
+from ..official_data import get_official_project_or_404
 
 router = APIRouter(prefix="/api/projects", tags=["early-warnings"])
 
@@ -45,9 +46,7 @@ def get_project_warnings(
     Does NOT insert, update, or delete any records.
     Use POST /early-warnings/assess to trigger the engine.
     """
-    p = db.query(models.Project).filter(models.Project.id == project_id).first()
-    if not p:
-        raise HTTPException(status_code=404, detail="Project not found")
+    p = get_official_project_or_404(db, project_id)
 
     warnings = (
         db.query(models.EarlyWarning)
@@ -73,9 +72,7 @@ def assess_project_warnings(
     MUTATING: runs the EarlyWarningEngine for this project, persists new warnings
     (deduplication via trigger_signature), and returns all current warnings.
     """
-    p = db.query(models.Project).filter(models.Project.id == project_id).first()
-    if not p:
-        raise HTTPException(status_code=404, detail="Project not found")
+    p = get_official_project_or_404(db, project_id)
 
     engine = EarlyWarningEngine(db)
     engine.assess_project(project_id)
@@ -95,6 +92,7 @@ def assess_project_warnings(
 @router.patch("/{project_id}/early-warning/{warning_id}", response_model=schemas.EarlyWarningItem)
 def update_warning_status(project_id: int, warning_id: int, payload: schemas.WarningStatusUpdate,
                           db: Session = Depends(get_db), user: dict = Depends(RoleChecker(["Admin", "Auditor", "State", "District"]))):
+    get_official_project_or_404(db, project_id)
     warning = db.query(models.EarlyWarning).filter(
         models.EarlyWarning.id == warning_id,
         models.EarlyWarning.project_id == project_id,

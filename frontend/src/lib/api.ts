@@ -1,8 +1,10 @@
 import axios from 'axios';
 
-const api = axios.create({
-  baseURL: 'http://127.0.0.1:8000',
-});
+// VITE_API_BASE_URL is required for deployments.  The development fallback
+// follows the browser host so localhost and LAN development remain usable.
+const configuredApiBaseUrl = import.meta.env.VITE_API_BASE_URL;
+const developmentApiBaseUrl = `${window.location.protocol}//${window.location.hostname}:8000`;
+const api = axios.create({ baseURL: configuredApiBaseUrl || developmentApiBaseUrl });
 
 api.interceptors.request.use((config) => {
   const token = localStorage.getItem('token');

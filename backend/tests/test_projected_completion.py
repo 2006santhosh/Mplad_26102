@@ -5,7 +5,7 @@ from app.auth_utils import get_current_user
 from sqlalchemy import create_engine
 from sqlalchemy.pool import StaticPool
 from sqlalchemy.orm import sessionmaker
-from app.models import Base, Project, ProjectProgress
+from app.models import DataSource, Base, Project, ProjectProgress
 from datetime import datetime, date, timedelta
 
 engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False}, poolclass=StaticPool)
@@ -14,6 +14,9 @@ Base.metadata.create_all(bind=engine)
 
 def override_get_db():
     db = TestingSessionLocal()
+    if not db.query(DataSource).filter(DataSource.id == 1).first():
+        db.add(DataSource(id=1, source_name="Official Data", source_type="OFFICIAL"))
+        db.commit()
     try:
         yield db
     finally:

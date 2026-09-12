@@ -14,6 +14,12 @@ SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 Base = declarative_base()
 
+def database_diagnostic() -> dict:
+    """Return a safe runtime identifier; never return credentials or query parameters."""
+    if DATABASE_URL.startswith("sqlite:///"):
+        return {"engine": "sqlite", "database": os.path.abspath(DATABASE_URL.removeprefix("sqlite:///"))}
+    return {"engine": DATABASE_URL.split(":", 1)[0], "database": "configured externally"}
+
 def get_db():
     db = SessionLocal()
     try:

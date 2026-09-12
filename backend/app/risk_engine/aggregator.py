@@ -36,12 +36,14 @@ class RiskAggregator:
         assessable = [ind for ind in indicators if ind.get("status") == "ASSESSABLE"]
         assessable_count = len(assessable)
         total_count = len(indicators)
+        unavailable_count = total_count - assessable_count
         
-        coverage_pct = (assessable_count / total_count * 100) if total_count > 0 else 0
+        coverage_pct = (assessable_count / total_count * 100) if total_count > 0 else 0.0
         
         assessment_coverage = {
             "assessable": assessable_count,
             "total": total_count,
+            "unavailable": unavailable_count,
             "percentage": round(coverage_pct, 1)
         }
         
@@ -75,6 +77,9 @@ class RiskAggregator:
             "assessment_coverage": assessment_coverage,
             "assessable_indicator_count": assessable_count,
             "total_indicator_count": total_count,
+            "unavailable_indicator_count": unavailable_count,
             "risk_reasons": reasons,
-            "indicators": indicators
+            "indicators": indicators,
+            "engine_version": "5.0.0",
+            "provenance": "AI ASSESSMENT"
         }

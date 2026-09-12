@@ -11,6 +11,8 @@ router = APIRouter(prefix="/api/pre-sanction", tags=["pre-sanction"])
 
 @router.post("/", response_model=schemas.RiskAssessmentResponse)
 def analyze_pre_sanction(req: schemas.PreSanctionRequest, db: Session = Depends(get_db), current_user: dict = Depends(get_current_user)):
+    # _get_project_context is deliberately official-only; proposals are never
+    # benchmarked against demonstration records.
     context = _get_project_context(db)
     
     # We construct a hypothetical target
@@ -19,8 +21,10 @@ def analyze_pre_sanction(req: schemas.PreSanctionRequest, db: Session = Depends(
         'category': req.category,
         'sanctioned_amount': req.sanctioned_amount,
         'location': req.location,
-        'progress_pct': 0, # Not started
-        'expenditure': 0.0,
+        # These are proposal inputs, not observed official facts.  Keep missing
+        # observations absent so unavailable evidence is not converted to zero.
+        'progress_pct': None,
+        'expenditure': None,
         'planned_completion': date.today() + timedelta(days=req.planned_duration_days),
         'actual_completion': None,
         'status': 'PROPOSED',

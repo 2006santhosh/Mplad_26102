@@ -46,8 +46,10 @@ export const ProjectRegister = () => {
       .finally(() => setLoading(false));
   }, [search, stageFilter, riskFilter, page]);
 
+  // These are the official eSAKSHI WORK_STAGE values used by ingestion.
   const stages = [
-    'Sanctioned', 'Work Awarded', 'Physical Inspection', 'Work Completed', 'Ongoing', 'Delayed', 'Not Started'
+    'Sanction', 'Time Estimation', 'Vendor Identification', 'Physical Inspection',
+    'Work partially Completed', 'Work Completed'
   ];
 
   const totalPages = Math.ceil(totalCount / pageSize) || 1;
@@ -101,10 +103,10 @@ export const ProjectRegister = () => {
             <Info className="w-5 h-5 text-blue-600 shrink-0 mt-0.5" />
             <div>
               <p className="font-semibold text-blue-950">
-                Official Ingestion Verified: {projects.length} Authentic eSAKSHI Work Records
+                Showing {projects.length} of {totalCount.toLocaleString('en-IN')} official eSAKSHI work records
               </p>
               <p className="text-xs text-blue-800 mt-0.5">
-                Work-level records fetched from the official MoSPI/eSAKSHI government API.
+                Work-level records ingested from the bundled official MoSPI/eSAKSHI export.
                 Analytical Progress Proxy is indicated as an{' '}
                 <span className="font-semibold underline">Analytical Progress Proxy</span> derived from official
                 WORK_STAGE categories (Sanction, Vendor Identification, Physical Inspection, Work Completed).

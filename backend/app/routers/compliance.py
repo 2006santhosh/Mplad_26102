@@ -15,6 +15,7 @@ from ..database import get_db
 from .. import models, schemas
 from ..auth_utils import get_current_user, RoleChecker
 from ..compliance_engine.aggregator import ComplianceAggregator
+from ..official_data import get_official_project_or_404
 
 router = APIRouter(prefix="/api/projects/{project_id}/compliance", tags=["compliance"])
 
@@ -130,9 +131,7 @@ def assess_compliance(
     user: dict = Depends(RoleChecker(["Admin", "Auditor", "State", "District"]))
 ):
     """Explicitly run the compliance engine and persist a new assessment."""
-    p = db.query(models.Project).filter(models.Project.id == project_id).first()
-    if not p:
-        raise HTTPException(status_code=404, detail="Project not found")
+    p = get_official_project_or_404(db, project_id)
 
     context = _build_project_context(p, db)
     aggregator = ComplianceAggregator()
@@ -151,9 +150,7 @@ def get_compliance(
 ):
     """Retrieve the latest persisted compliance assessment.
     Does NOT create a new assessment — use POST /assess for that."""
-    p = db.query(models.Project).filter(models.Project.id == project_id).first()
-    if not p:
-        raise HTTPException(status_code=404, detail="Project not found")
+    p = get_official_project_or_404(db, project_id)
 
     ca = db.query(models.ComplianceAssessment).filter(
         models.ComplianceAssessment.project_id == project_id

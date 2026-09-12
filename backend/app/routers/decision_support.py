@@ -5,6 +5,7 @@ from ..database import get_db
 from .. import models, schemas
 from ..auth_utils import get_current_user
 from ..services.review_priority import calculate_review_priority
+from ..official_data import get_official_project_or_404
 import datetime
 
 router = APIRouter(prefix="/api/projects/{project_id}/decision-support", tags=["decision-support"])
@@ -12,9 +13,7 @@ router = APIRouter(prefix="/api/projects/{project_id}/decision-support", tags=["
 @router.get("", response_model=schemas.DecisionSupportResponse)
 @router.get("/", response_model=schemas.DecisionSupportResponse)
 def get_decision_support(project_id: int, db: Session = Depends(get_db), current_user: dict = Depends(get_current_user)):
-    p = db.query(models.Project).filter(models.Project.id == project_id).first()
-    if not p:
-        raise HTTPException(status_code=404, detail="Project not found")
+    p = get_official_project_or_404(db, project_id)
 
     # 1. Fetch all required existing data in a read-only manner
     risk_assessment = db.query(models.RiskAssessment).filter(models.RiskAssessment.project_id == project_id).order_by(desc(models.RiskAssessment.created_at), desc(models.RiskAssessment.id)).first()

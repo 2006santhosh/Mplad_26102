@@ -3,15 +3,14 @@ from sqlalchemy.orm import Session
 from ..database import get_db
 from .. import models, schemas
 from ..auth_utils import get_current_user
+from ..official_data import get_official_project_or_404
 import datetime
 
 router = APIRouter(prefix="/api/trends", tags=["trends"])
 
 @router.get("/{project_id}", response_model=list[schemas.TrendResponse])
 def get_project_trends(project_id: int, db: Session = Depends(get_db), current_user: dict = Depends(get_current_user)):
-    p = db.query(models.Project).filter(models.Project.id == project_id).first()
-    if not p:
-        raise HTTPException(status_code=404, detail="Project not found")
+    p = get_official_project_or_404(db, project_id)
 
     responses = []
 
@@ -42,7 +41,7 @@ def get_project_trends(project_id: int, db: Session = Depends(get_db), current_u
         responses.append(schemas.TrendResponse(
             type="expenditure",
             data=fin_data,
-            source_type="Financial Logs"
+            source_type="OFFICIAL"
         ))
 
     # 2. Progress Trends
@@ -72,7 +71,7 @@ def get_project_trends(project_id: int, db: Session = Depends(get_db), current_u
         responses.append(schemas.TrendResponse(
             type="progress",
             data=prog_data,
-            source_type="Progress Reports"
+            source_type="DERIVED"
         ))
         
     return responses

@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session
 from ..database import get_db
 from .. import models
 from ..auth_utils import get_current_user
+from ..official_data import get_official_project_or_404
 import csv
 import io
 import json
@@ -13,9 +14,7 @@ router = APIRouter(prefix='/api/reports', tags=['reports'])
 
 @router.get('/projects/{project_id}.json')
 def export_project(project_id: int, db: Session = Depends(get_db), user: dict = Depends(get_current_user)):
-    project = db.query(models.Project).filter(models.Project.id == project_id).first()
-    if not project:
-        raise HTTPException(status_code=404, detail='Project not found')
+    project = get_official_project_or_404(db, project_id)
     risk = db.query(models.RiskAssessment).filter(models.RiskAssessment.project_id == project_id).order_by(models.RiskAssessment.created_at.desc(), models.RiskAssessment.id.desc()).first()
     compliance = db.query(models.ComplianceAssessment).filter(models.ComplianceAssessment.project_id == project_id).order_by(models.ComplianceAssessment.assessed_at.desc(), models.ComplianceAssessment.id.desc()).first()
     warnings = db.query(models.EarlyWarning).filter(models.EarlyWarning.project_id == project_id).all()
@@ -40,9 +39,7 @@ def export_project(project_id: int, db: Session = Depends(get_db), user: dict = 
 
 @router.get('/projects/{project_id}.csv')
 def export_project_csv(project_id: int, db: Session = Depends(get_db), user: dict = Depends(get_current_user)):
-    project = db.query(models.Project).filter(models.Project.id == project_id).first()
-    if not project:
-        raise HTTPException(status_code=404, detail='Project not found')
+    project = get_official_project_or_404(db, project_id)
     official_user = db.query(models.User).filter(models.User.username == user.get('sub')).first()
     if official_user:
         db.add(models.AuditLog(user_id=official_user.id, action='PROJECT_REPORT_EXPORTED', entity_type='Project', entity_id=project_id, details='Structured CSV project report exported'))

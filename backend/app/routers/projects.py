@@ -7,6 +7,7 @@ from ..auth_utils import get_current_user, RoleChecker
 from ..risk_engine.aggregator import RiskAggregator
 from ..risk_engine.trend_analyzer import TrendAnalyzer
 from ..services.review_priority import calculate_review_priority
+from ..official_data import get_official_project_or_404, official_projects_query
 from datetime import date, datetime
 
 CURRENT_RISK_ENGINE_VERSION = "5.0.0"
@@ -14,7 +15,8 @@ CURRENT_RISK_ENGINE_VERSION = "5.0.0"
 router = APIRouter(prefix="/api/projects", tags=["projects"])
 
 def _get_project_context(db: Session):
-    projects = db.query(models.Project).options(joinedload(models.Project.mp)).all()
+    # Every peer baseline in the primary flow is official-only.
+    projects = official_projects_query(db).options(joinedload(models.Project.mp)).all()
 
     progress_rows = db.query(
         models.ProjectProgress.project_id,
@@ -65,7 +67,12 @@ def _get_project_context(db: Session):
             'expenditure_pct': (float(exp) / float(p.sanctioned_amount) * 100) if exp is not None and p.sanctioned_amount else None,
             'delay_days': (date.today() - p.planned_completion).days if p.planned_completion and p.status != 'COMPLETED' else None
         })
-    df_projects = pd.DataFrame(data)
+    df_projects = pd.DataFrame(data) if data else pd.DataFrame(columns=[
+        'id', 'category', 'sanctioned_amount', 'location', 'progress_pct',
+        'expenditure', 'planned_completion', 'actual_completion', 'status',
+        'description', 'district', 'constituency', 'work_category',
+        'latitude', 'longitude', 'mp_name', 'expenditure_pct', 'delay_days'
+    ])
     
     # Contract mappings
     c_data = []
@@ -312,9 +319,7 @@ def get_map_data(db: Session = Depends(get_db), current_user: dict = Depends(get
 
 @router.get("/{project_id}", response_model=schemas.ProjectDetailResponse)
 def get_project(project_id: int, db: Session = Depends(get_db), current_user: dict = Depends(get_current_user)):
-    p = db.query(models.Project).filter(models.Project.id == project_id).first()
-    if not p:
-        raise HTTPException(status_code=404, detail="Project not found")
+    p = get_official_project_or_404(db, project_id)
         
     prog = db.query(models.ProjectProgress).filter(models.ProjectProgress.project_id == project_id).order_by(models.ProjectProgress.reported_at.desc(), models.ProjectProgress.id.desc()).first()
     fin = db.query(models.ProjectFinancials).filter(models.ProjectFinancials.project_id == project_id).order_by(models.ProjectFinancials.updated_at.desc(), models.ProjectFinancials.id.desc()).first()
@@ -342,9 +347,7 @@ def get_project(project_id: int, db: Session = Depends(get_db), current_user: di
     )
 
 def _calculate_and_persist_risk(project_id: int, db: Session) -> schemas.RiskAssessmentResponse:
-    p = db.query(models.Project).filter(models.Project.id == project_id).first()
-    if not p:
-        raise HTTPException(status_code=404, detail="Project not found")
+    p = get_official_project_or_404(db, project_id)
         
     context = _get_project_context(db)
     df_p = context['df_projects']
@@ -416,8 +419,7 @@ def run_project_risk(project_id: int, db: Session = Depends(get_db), user: dict 
         models.RiskAssessment.id.desc(),
     ).first()
     if not assessment:
-        if not db.query(models.Project).filter(models.Project.id == project_id).first():
-            raise HTTPException(status_code=404, detail="Project not found")
+        get_official_project_or_404(db, project_id)
         return schemas.RiskAssessmentResponse(
             level="LIMITED",
             assessment_status="NOT_ASSESSABLE",
@@ -458,9 +460,7 @@ def create_project_risk_assessment(project_id: int, db: Session = Depends(get_db
 
 @router.get("/{project_id}/risk/history", response_model=schemas.RiskHistoryResponse)
 def get_risk_history(project_id: int, limit: int = Query(100, ge=1, le=500), db: Session = Depends(get_db), current_user: dict = Depends(get_current_user)):
-    p = db.query(models.Project).filter(models.Project.id == project_id).first()
-    if not p:
-        raise HTTPException(status_code=404, detail="Project not found")
+    p = get_official_project_or_404(db, project_id)
 
     # Order oldest to newest for trend analysis, but return newest to oldest
     assessments = db.query(models.RiskAssessment).filter(
@@ -560,9 +560,7 @@ def get_risk_history(project_id: int, limit: int = Query(100, ge=1, le=500), db:
 
 @router.get("/{project_id}/compliance/history", response_model=schemas.ComplianceHistoryResponse)
 def get_compliance_history(project_id: int, limit: int = Query(100, ge=1, le=500), db: Session = Depends(get_db), current_user: dict = Depends(get_current_user)):
-    p = db.query(models.Project).filter(models.Project.id == project_id).first()
-    if not p:
-        raise HTTPException(status_code=404, detail="Project not found")
+    p = get_official_project_or_404(db, project_id)
 
     assessments = db.query(models.ComplianceAssessment).filter(
         models.ComplianceAssessment.project_id == project_id

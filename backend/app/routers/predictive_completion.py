@@ -4,15 +4,14 @@ from ..database import get_db
 from .. import models, schemas
 from ..auth_utils import get_current_user, RoleChecker
 from ..risk_engine.predictive_completion import PredictiveCompletionRiskEngine
+from ..official_data import get_official_project_or_404
 
 router = APIRouter(prefix="/api/projects/{project_id}/predictive-completion", tags=["predictive-completion"])
 
 @router.get("", response_model=schemas.PredictiveCompletionResponse)
 @router.get("/", response_model=schemas.PredictiveCompletionResponse)
 def get_predictive_completion(project_id: int, db: Session = Depends(get_db), current_user: dict = Depends(get_current_user)):
-    p = db.query(models.Project).filter(models.Project.id == project_id).first()
-    if not p:
-        raise HTTPException(status_code=404, detail="Project not found")
+    p = get_official_project_or_404(db, project_id)
 
     assessment = db.query(models.PredictiveCompletionAssessment).filter(
         models.PredictiveCompletionAssessment.project_id == project_id
@@ -47,9 +46,7 @@ def get_predictive_completion(project_id: int, db: Session = Depends(get_db), cu
 
 @router.post("/assess", response_model=schemas.PredictiveCompletionResponse)
 def run_predictive_completion(project_id: int, db: Session = Depends(get_db), current_user: dict = Depends(RoleChecker(["Admin", "Auditor", "State", "District"]))):
-    p = db.query(models.Project).filter(models.Project.id == project_id).first()
-    if not p:
-        raise HTTPException(status_code=404, detail="Project not found")
+    p = get_official_project_or_404(db, project_id)
 
     engine = PredictiveCompletionRiskEngine(db)
     result = engine.assess(project_id)

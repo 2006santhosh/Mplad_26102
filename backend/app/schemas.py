@@ -44,7 +44,77 @@ class RiskDistribution(BaseModel):
     LIMITED: int = 0
 
 class DashboardStatsResponse(BaseModel):
+
     total_projects: Optional[int] = None
+    total_projects_provenance: Optional[str] = None
+    total_sanctioned_amount: Optional[float] = None
+    total_sanctioned_amount_provenance: Optional[str] = None
+    total_expenditure: Optional[float] = None
+    total_expenditure_provenance: Optional[str] = None
+    utilization_percentage: Optional[float] = None
+    utilization_percentage_provenance: Optional[str] = None
+
+    total_mps: Optional[int] = None
+    total_mps_provenance: Optional[str] = None
+    total_allocated_amount: Optional[float] = None
+    total_allocated_amount_provenance: Optional[str] = None
+
+    projects_with_progress: int
+    projects_with_progress_provenance: Optional[str] = None
+    average_progress: Optional[float] = None
+    average_progress_provenance: Optional[str] = None
+
+    ai_risk_projects: int
+    ai_risk_projects_provenance: Optional[str] = None
+    ai_risk_signal_total: int = 0
+    ai_risk_signal_total_provenance: Optional[str] = None
+    ai_risk_signal_breakdown: Optional[List[dict]] = None
+    ai_risk_signal_breakdown_provenance: Optional[str] = None
+    human_review_flags: int
+    human_review_flags_provenance: Optional[str] = None
+    delayed_projects: int
+    delayed_projects_provenance: Optional[str] = None
+    projects_requiring_attention: int
+    projects_requiring_attention_provenance: Optional[str] = None
+    gps_coverage_percentage: Optional[float] = None
+    gps_coverage_percentage_provenance: Optional[str] = None
+
+    risk_distribution: RiskDistribution
+    risk_distribution_provenance: Optional[str] = None
+    projects_by_category: List[DashboardCategoryStat]
+    projects_by_category_provenance: Optional[str] = None
+    early_warnings: Optional["EarlyWarningOverview"] = None
+    early_warnings_provenance: Optional[str] = None
+
+    # Compliance Intelligence Summary
+    compliance_pass_count: Optional[int] = None
+    compliance_pass_count_provenance: Optional[str] = None
+    compliance_review_count: Optional[int] = None
+    compliance_review_count_provenance: Optional[str] = None
+    compliance_not_assessable_count: Optional[int] = None
+    compliance_not_assessable_count_provenance: Optional[str] = None
+    compliance_assessed_projects: Optional[int] = None
+    compliance_assessed_projects_provenance: Optional[str] = None
+
+    predictive_high_risk: Optional[int] = None
+    predictive_high_risk_provenance: Optional[str] = None
+    predictive_medium_risk: Optional[int] = None
+    predictive_medium_risk_provenance: Optional[str] = None
+    predictive_not_assessable: Optional[int] = None
+    predictive_not_assessable_provenance: Optional[str] = None
+
+    review_priority_critical: Optional[int] = None
+    review_priority_critical_provenance: Optional[str] = None
+    review_priority_high: Optional[int] = None
+    review_priority_high_provenance: Optional[str] = None
+    review_priority_medium: Optional[int] = None
+    review_priority_medium_provenance: Optional[str] = None
+    review_priority_low: Optional[int] = None
+    review_priority_low_provenance: Optional[str] = None
+    insufficient_evidence_projects: Optional[int] = None
+    insufficient_evidence_projects_provenance: Optional[str] = None
+    portfolio_breakdown: Optional[Dict[str, List[dict]]] = None
+    portfolio_breakdown_provenance: Optional[str] = None
     total_sanctioned_amount: Optional[float] = None
     total_expenditure: Optional[float] = None
     utilization_percentage: Optional[float] = None
@@ -595,3 +665,16 @@ class ReviewCaseListResponse(BaseModel):
     action_required_count: int
     resolved_count: int
     dismissed_count: int
+
+class PeerComparisonMetric(BaseModel):
+    metric_name: str
+    project_value: Optional[float] = None
+    peer_average: Optional[float] = None
+    difference_percentage: Optional[float] = None
+    is_anomaly: bool = False
+
+class PeerComparisonResponse(BaseModel):
+    project_id: int
+    peer_group_name: str
+    peer_count: int
+    metrics: List[PeerComparisonMetric]

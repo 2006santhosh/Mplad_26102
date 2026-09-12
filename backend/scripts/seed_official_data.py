@@ -51,6 +51,14 @@ def stage_to_proxy_pct(stage, status):
     return mapping.get(stage, 15)
 
 def seed_official():
+    """Idempotently synchronise the bundled authoritative datasets.
+
+    The return value is intentionally JSON-serialisable so operators can retain
+    an ingestion record without exposing database credentials.
+    """
+    report = {"mps_read": 0, "mps_imported": 0, "mps_updated": 0,
+              "works_read": 0, "works_imported": 0, "works_updated": 0,
+              "works_skipped": 0, "unmatched_mps": [], "warnings": []}
     Base.metadata.create_all(bind=engine)
     db = SessionLocal()
     try:
@@ -139,17 +147,21 @@ def seed_official():
                         allocated_amount=amt
                     )
                     db.add(new_mp)
-                    mp_count += 1
-                else:
-                    existing_mp.constituency = constituency
-                    existing_mp.allocated_amount = amt
+                mp_count += 1
+                report["mps_imported"] += 1
+            else:
+                existing_mp.constituency = constituency
+                existing_mp.allocated_amount = amt
+                existing_mp.data_source_id = ds.id
+                report["mps_updated"] += 1
+            report["mps_read"] += 1
             db.commit()
             print(f"Ingested / updated {mp_count} official MP allocation records from CSV.")
 
         # Build MP lookup mapping
         all_mps = db.query(MP).all()
         mp_by_name = {mp.name.strip().upper(): mp for mp in all_mps}
-        default_mp = all_mps[0] if all_mps else None
+        # Never attach an unmatched official work to an arbitrary MP.
 
         # 5. Ingest 2,462 Official eSAKSHI Work Records
         json_path = os.path.join(os.path.dirname(__file__), "..", "..", "Data", "Official", "eSAKSHI_Official_Works_Sample.json")
@@ -158,22 +170,28 @@ def seed_official():
             with open(json_path, "r", encoding="utf-8") as f:
                 works_data = json.load(f)
 
-            # Check if works are already loaded
-            existing_work_ids = set(
-                w[0] for w in db.query(Project.work_id).filter(Project.data_source_id == ds.id).all() if w[0]
-            )
+            existing_projects = {p.work_id: p for p in db.query(Project).filter(
+                Project.data_source_id == ds.id, Project.work_id.isnot(None)
+            ).all()}
 
             new_projects = []
             financials_to_add = []
             progress_to_add = []
 
             for item in works_data:
-                work_id_val = str(item.get("WORK_ID") or item.get("WORK_RECOMMENDATION_DTL_ID") or "").strip()
-                if work_id_val and work_id_val in existing_work_ids:
+                report["works_read"] += 1
+                work_id_val = str(item.get("WORK_RECOMMENDATION_DTL_ID") or item.get("WORK_ID") or "").strip()
+                if not work_id_val:
+                    report["works_skipped"] += 1
+                    report["warnings"].append("Skipped work with no stable work identifier")
                     continue
 
                 mp_name_raw = str(item.get("MP_NAME") or "").strip().upper()
-                matched_mp = mp_by_name.get(mp_name_raw, default_mp)
+                matched_mp = mp_by_name.get(mp_name_raw)
+                if not matched_mp:
+                    report["works_skipped"] += 1
+                    report["unmatched_mps"].append({"work_id": work_id_val, "mp_name": mp_name_raw})
+                    continue
 
                 s_amt_raw = item.get("SANCTION_AMOUNT") or item.get("RECOMMENDED_AMOUNT") or 0.0
                 try:
@@ -183,7 +201,6 @@ def seed_official():
 
                 s_date = parse_date(item.get("SANCTION_DATE")) or parse_date(item.get("RECOMMENDATION_DATE"))
                 c_date = parse_date(item.get("ACTUAL_END_DATE"))
-                p_comp = (s_date + timedelta(days=365)) if s_date else None
 
                 rec_type = str(item.get("RECORD_STATUS_TYPE", "")).upper()
                 w_stage = str(item.get("WORK_STAGE") or "")
@@ -202,35 +219,30 @@ def seed_official():
                 location = f"{constituency}, {state}".strip(", ")
                 description = str(item.get("WORK_DESCRIPTION") or "")
 
-                proj = Project(
-                    mp_id=matched_mp.id if matched_mp else 1,
-                    data_source_id=ds.id,
-                    work_id=work_id_val,
-                    work_stage=w_stage or "Sanction",
-                    district=district,
-                    constituency=constituency,
-                    description=description,
-                    work_category=str(item.get("WORK_CATEGORY") or "Normal/Others"),
-                    category=category,
-                    sanctioned_amount=sanctioned_amt,
-                    location=location,
-                    latitude=None, # Strictly authentic: no fake coordinates
-                    longitude=None,
-                    planned_start=s_date,
-                    planned_completion=p_comp,
-                    actual_completion=c_date,
-                    status=status
-                )
+                values = dict(mp_id=matched_mp.id, data_source_id=ds.id, work_id=work_id_val,
+                    work_stage=w_stage or None, district=district, constituency=constituency,
+                    description=description, work_category=str(item.get("WORK_CATEGORY") or "Normal/Others"),
+                    category=category, sanctioned_amount=sanctioned_amt, location=location,
+                    latitude=None, longitude=None, gps_provenance="UNAVAILABLE",
+                    # The export does not provide planned dates.  Do not invent them.
+                    planned_start=None, planned_completion=None, actual_completion=c_date, status=status)
+                proj = existing_projects.get(work_id_val)
+                if proj:
+                    for key, value in values.items():
+                        setattr(proj, key, value)
+                    report["works_updated"] += 1
+                else:
+                    proj = Project(**values)
+                    db.add(proj)
+                    report["works_imported"] += 1
                 new_projects.append((proj, item, status, w_stage))
 
-            # Batch insert projects
-            for proj, item, status, w_stage in new_projects:
-                db.add(proj)
             db.commit()
 
             # Add financials and progress
             for proj, item, status, w_stage in new_projects:
                 act_amt = item.get("ACTUAL_AMOUNT")
+                db.query(ProjectFinancials).filter(ProjectFinancials.project_id == proj.id).delete()
                 if act_amt is not None:
                     try:
                         exp = float(act_amt)
@@ -239,14 +251,56 @@ def seed_official():
                     except Exception:
                         pass
 
-                proxy_pct = stage_to_proxy_pct(w_stage, status)
-                db.add(ProjectProgress(project_id=proj.id, percentage=proxy_pct))
+                # This is an explicitly derived proxy, and is absent when the
+                # official WORK_STAGE field is absent.
+                db.query(ProjectProgress).filter(ProjectProgress.project_id == proj.id).delete()
+                if w_stage:
+                    db.add(ProjectProgress(project_id=proj.id, percentage=stage_to_proxy_pct(w_stage, status)))
                 work_count += 1
             db.commit()
-            print(f"Ingested {work_count} authentic eSAKSHI project records.")
+            source_ids = {str(item.get("WORK_RECOMMENDATION_DTL_ID") or item.get("WORK_ID") or "").strip() for item in works_data}
+            stale = [work_id for work_id in existing_projects if work_id not in source_ids]
+            if stale:
+                report["warnings"].append(f"{len(stale)} previously ingested official works are absent from this source extract; retained for audit safety.")
+            print(f"Synchronised {work_count} authentic eSAKSHI project records.")
+
+            # Risk assessment is intentionally explicit.  Ingestion must stay
+            # restartable and must not make a long-running ML rebuild a hidden
+            # side effect.  Existing assessments remain available; incomplete
+            # legacy rows are truthfully marked limited.
+            if os.getenv("REBUILD_RISK_ON_INGEST", "0") != "1":
+                db.query(RiskAssessment).filter(
+                    RiskAssessment.project_id.in_([proj.id for proj, _, _, _ in new_projects]),
+                    RiskAssessment.assessment_status.is_(None),
+                ).update({
+                    RiskAssessment.assessment_status: "LIMITED / INSUFFICIENT_EVIDENCE",
+                    RiskAssessment.assessment_coverage_pct: 0.0,
+                    RiskAssessment.assessable_indicator_count: 0,
+                    RiskAssessment.total_indicator_count: 0,
+                    RiskAssessment.risk_reasons: [],
+                    RiskAssessment.engine_version: "legacy-unverified",
+                }, synchronize_session=False)
+                db.commit()
+                report["warnings"].append("Risk assessments were not rebuilt; set REBUILD_RISK_ON_INGEST=1 for an explicit full analytical refresh.")
+                total_mps_db = db.query(MP).filter(MP.data_source_id == ds.id).count()
+                total_proj_db = db.query(Project).filter(Project.data_source_id == ds.id).count()
+                report["official_mps"], report["official_works"] = total_mps_db, total_proj_db
+                print("INGESTION_REPORT=" + json.dumps(report, ensure_ascii=False))
+                return report
 
             # 6. Run Risk Engine on official works
             print("Evaluating risk intelligence across authentic government works...")
+            official_project_ids = [proj.id for proj, _, _, _ in new_projects]
+            # Rebuild persisted seed assessments atomically enough for a local
+            # refresh: stale indicators must not outlive changed source values.
+            old_assessment_ids = [row[0] for row in db.query(RiskAssessment.id).filter(
+                RiskAssessment.project_id.in_(official_project_ids)
+            ).all()]
+            if old_assessment_ids:
+                db.query(RiskIndicator).filter(RiskIndicator.risk_assessment_id.in_(old_assessment_ids)).delete(synchronize_session=False)
+                db.query(RiskAssessment).filter(RiskAssessment.id.in_(old_assessment_ids)).delete(synchronize_session=False)
+                db.query(RiskHistory).filter(RiskHistory.project_id.in_(official_project_ids)).delete(synchronize_session=False)
+                db.commit()
             from app.routers.projects import _get_project_context
             context = _get_project_context(db)
             df_p = context['df_projects']
@@ -266,7 +320,13 @@ def seed_official():
                 ra = RiskAssessment(
                     project_id=proj.id,
                     score=res['score'],
-                    overall_risk_level=res['level']
+                    overall_risk_level=res['level'],
+                    assessment_status=res.get('assessment_status'),
+                    assessment_coverage_pct=res.get('assessment_coverage', {}).get('percentage'),
+                    assessable_indicator_count=res.get('assessable_indicator_count'),
+                    total_indicator_count=res.get('total_indicator_count'),
+                    risk_reasons=res.get('risk_reasons'),
+                    engine_version='5.0.0',
                 )
                 assessments.append((ra, res['indicators']))
 
@@ -292,9 +352,13 @@ def seed_official():
             db.commit()
             print(f"Generated risk assessments for {len(assessments)} authentic works.")
 
-        total_mps_db = db.query(MP).count()
-        total_proj_db = db.query(Project).count()
+        total_mps_db = db.query(MP).filter(MP.data_source_id == ds.id).count()
+        total_proj_db = db.query(Project).filter(Project.data_source_id == ds.id).count()
+        report["official_mps"] = total_mps_db
+        report["official_works"] = total_proj_db
         print(f"Seeding Complete! Database has {total_mps_db} Official MPs and {total_proj_db} Official Works.")
+        print("INGESTION_REPORT=" + json.dumps(report, ensure_ascii=False))
+        return report
 
     finally:
         db.close()

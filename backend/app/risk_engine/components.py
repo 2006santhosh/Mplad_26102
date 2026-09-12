@@ -435,7 +435,9 @@ class IsolationForestDetector:
         available_features = []
         
         for f in features + ['expenditure_pct', 'delay_days']:
-            if f in df_projects.columns:
+            # A column is not evidence merely because it exists.  Retain only
+            # observed features with enough non-null official values.
+            if f in df_projects.columns and pd.to_numeric(df_projects[f], errors='coerce').notna().sum() >= 10:
                 available_features.append(f)
                 
         if len(available_features) < 2:
@@ -443,9 +445,9 @@ class IsolationForestDetector:
             return base
             
         df_clean = df_projects[['id'] + available_features].copy()
-        
         for f in available_features:
-            df_clean[f] = pd.to_numeric(df_clean[f], errors='coerce').fillna(0)
+            df_clean[f] = pd.to_numeric(df_clean[f], errors='coerce')
+        df_clean = df_clean.dropna(subset=available_features)
             
         if len(df_clean) < 10: 
             base['explanation'] = "Insufficient peer data for model training (n < 10)."
@@ -463,7 +465,10 @@ class IsolationForestDetector:
                 base['explanation'] = "Algorithm execution failed due to data shape."
                 return base
         
+        # Missing official values must result in UNAVAILABLE, never a zero-filled
+        # synthetic observation.
         if target_id not in self._cached_preds:
+            base['explanation'] = "Target lacks the observed feature set required for multivariate analysis."
             return base
             
         is_anomaly = self._cached_preds[target_id] == -1

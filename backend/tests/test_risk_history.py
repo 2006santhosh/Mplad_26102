@@ -5,7 +5,7 @@ from app.auth_utils import get_current_user
 from sqlalchemy import create_engine
 from sqlalchemy.pool import StaticPool
 from sqlalchemy.orm import sessionmaker
-from app.models import Base, Project, RiskAssessment, RiskIndicator
+from app.models import DataSource, Base, Project, RiskAssessment, RiskIndicator
 from datetime import datetime
 
 # Use an in-memory SQLite database for fast testing
@@ -15,6 +15,9 @@ Base.metadata.create_all(bind=engine)
 
 def override_get_db():
     db = TestingSessionLocal()
+    if not db.query(DataSource).filter(DataSource.id == 1).first():
+        db.add(DataSource(id=1, source_name="Official Data", source_type="OFFICIAL"))
+        db.commit()
     try:
         yield db
     finally:
@@ -69,7 +72,7 @@ def test_get_risk_history_nonexistent():
     # Since the project doesn't exist, we added a 404 handler
     response = client.get("/api/projects/999/risk/history")
     assert response.status_code == 404
-    assert response.json() == {"detail": "Project not found"}
+    assert response.json() == {"detail": "Official project not found"}
 
 
 def teardown_module():

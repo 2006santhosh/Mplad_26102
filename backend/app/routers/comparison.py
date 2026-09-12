@@ -3,6 +3,7 @@ from sqlalchemy.orm import Session
 from ..database import get_db
 from .. import models, schemas
 from ..auth_utils import get_current_user
+from ..official_data import get_official_project_or_404, official_projects_query
 import pandas as pd
 import numpy as np
 
@@ -10,9 +11,7 @@ router = APIRouter(prefix="/api/projects/{project_id}/comparison", tags=["compar
 
 @router.get("/", response_model=schemas.ProjectComparisonResponse)
 def get_project_comparison(project_id: int, db: Session = Depends(get_db), current_user: dict = Depends(get_current_user)):
-    p = db.query(models.Project).filter(models.Project.id == project_id).first()
-    if not p:
-        raise HTTPException(status_code=404, detail="Project not found")
+    p = get_official_project_or_404(db, project_id)
 
     if not p.category:
         return schemas.ProjectComparisonResponse(
@@ -23,7 +22,7 @@ def get_project_comparison(project_id: int, db: Session = Depends(get_db), curre
         )
 
     # Find peers (same category, exclude self)
-    peers = db.query(models.Project).filter(
+    peers = official_projects_query(db).filter(
         models.Project.category == p.category,
         models.Project.id != project_id
     ).all()

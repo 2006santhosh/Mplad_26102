@@ -161,11 +161,30 @@ def seed_demo_data(db):
     indicators_to_add = []
     
     for i, (p, _) in enumerate(all_projects):
-        match_row = df_p[df_p['id'] == p.id]
-        if match_row.empty:
-            continue
+        if not df_p.empty and 'id' in df_p.columns and not df_p[df_p['id'] == p.id].empty:
+            target = df_p[df_p['id'] == p.id].iloc[0].to_dict()
+        else:
+            prog_val = db.query(ProjectProgress).filter(ProjectProgress.project_id == p.id).first()
+            fin_val = db.query(ProjectFinancials).filter(ProjectFinancials.project_id == p.id).first()
+            target = {
+                'id': p.id,
+                'category': p.category,
+                'sanctioned_amount': float(p.sanctioned_amount) if p.sanctioned_amount else None,
+                'location': p.location or "",
+                'progress_pct': prog_val.percentage if prog_val else None,
+                'expenditure': float(fin_val.expenditure) if fin_val and fin_val.expenditure else None,
+                'planned_completion': p.planned_completion,
+                'actual_completion': p.actual_completion,
+                'status': p.status,
+                'description': p.description,
+                'district': p.district,
+                'constituency': p.constituency,
+                'work_category': p.work_category,
+                'latitude': p.latitude,
+                'longitude': p.longitude,
+                'mp_name': p.mp.name if p.mp else None,
+            }
             
-        target = match_row.iloc[0].to_dict()
         pcs = db.query(ProjectContractor).filter(ProjectContractor.project_id == p.id).all()
         target['contractors'] = [pc.contractor_id for pc in pcs]
         
